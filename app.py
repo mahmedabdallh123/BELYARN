@@ -153,7 +153,7 @@ def login_ui():
                 st.session_state.logged_in = True
                 st.session_state.username = username_input
                 st.success(f"✅ تم تسجيل الدخول: {username_input}")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("❌ كلمة المرور غير صحيحة.")
         return False
