@@ -109,7 +109,7 @@ def main_app():
     users = load_users()
     username = st.session_state["user"]
     user_info = users[username]
-    hall = user_info["hall"]
+    hall = user_info.get("hall", "A")
     role = user_info.get("role", "user")
 
     st.sidebar.title("📋 القائمة")
