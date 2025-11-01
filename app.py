@@ -25,11 +25,11 @@ SESSION_DURATION = timedelta(minutes=10)  # مدة الجلسة 10 دقائق
 MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
 
 # إعدادات GitHub (مسارات الملف والريبو)
-REPO_NAME = "mahmedabdallh123/input-data"  # عدل إذا لزم
+REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
 BRANCH = "main"
 FILE_PATH = "Machine_Service_Lookup.xlsx"
 LOCAL_FILE = "Machine_Service_Lookup.xlsx"
-GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/input-data/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
+GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/BELYARN/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
@@ -239,8 +239,7 @@ def load_all_sheets():
         for name, df in sheets.items():
             df.columns = df.columns.astype(str).str.strip()
         
-        st.success(f"✅ تم تحميل {len(sheets)} شيت بنجاح")
-        st.info(f"📊 أسماء الشيتات: {list(sheets.keys())}")
+    
         
         return sheets
     except Exception as e:
