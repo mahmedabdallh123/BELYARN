@@ -25,11 +25,11 @@ SESSION_DURATION = timedelta(minutes=10)  # مدة الجلسة 10 دقائق
 MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
 
 # إعدادات GitHub (مسارات الملف والريبو)
-REPO_NAME = "mahmedabdallh123/input-data"  # عدل إذا لزم
+REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
 BRANCH = "main"
 FILE_PATH = "Machine_Service_Lookup.xlsx"
 LOCAL_FILE = "Machine_Service_Lookup.xlsx"
-GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/NEW-CMMS/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
+GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/BELYARN/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
@@ -114,7 +114,7 @@ def logout_action():
     keys = list(st.session_state.keys())
     for k in keys:
         st.session_state.pop(k, None)
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------
 # 🧠 واجهة تسجيل الدخول (مأخوذ وموسع)
@@ -291,7 +291,7 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         return load_sheets_for_edit()
 
 # -------------------------------
-# 🧰 دوال مساعدة للمعالجة والنصوص (مأخوذة كاملة)
+# 🧰 دوال مساعدة للمعالجة والنصوص
 # -------------------------------
 def normalize_name(s):
     if s is None: return ""
@@ -309,14 +309,16 @@ def split_needed_services(needed_service_str):
 def highlight_cell(val, col_name):
     color_map = {
         "Service Needed": "background-color: #fff3cd; color:#856404; font-weight:bold;",
-        "Done Services": "background-color: #d4edda; color:#155724; font-weight:bold;",
-        "Not Done Services": "background-color: #f8d7da; color:#721c24; font-weight:bold;",
-        "Last Date": "background-color: #e7f1ff; color:#004085; font-weight:bold;",
-        "Last Tones": "background-color: #f0f0f0; color:#333; font-weight:bold;",
-        "Other": "background-color: #e2f0d9; color:#2e6f32; font-weight:bold;",
-        "Servised by": "background-color: #fdebd0; color:#7d6608; font-weight:bold;",
+        "Service Done": "background-color: #d4edda; color:#155724; font-weight:bold;",
+        "Service Didn't Done": "background-color: #f8d7da; color:#721c24; font-weight:bold;",
+        "Date": "background-color: #e7f1ff; color:#004085; font-weight:bold;",
+        "Tones": "background-color: #e8f8f5; color:#0d5c4a; font-weight:bold;",
         "Min_Tons": "background-color: #ebf5fb; color:#154360; font-weight:bold;",
         "Max_Tons": "background-color: #f9ebea; color:#641e16; font-weight:bold;",
+        "Event": "background-color: #e2f0d9; color:#2e6f32; font-weight:bold;",
+        "Correction": "background-color: #fdebd0; color:#7d6608; font-weight:bold;",
+        "Servised by": "background-color: #f0f0f0; color:#333; font-weight:bold;",
+        "Card Number": "background-color: #ebdef0; color:#4a235a; font-weight:bold;"
     }
     return color_map.get(col_name, "")
 
@@ -324,7 +326,7 @@ def style_table(row):
     return [highlight_cell(row[col], col) for col in row.index]
 
 # -------------------------------
-# 🖥 دالة فحص الماكينة (مأخوذة كاملة)
+# 🖥 دالة فحص الماكينة - معدلة لعرض جميع الأحداث
 # -------------------------------
 def check_machine_status(card_num, current_tons, all_sheets):
     if not all_sheets or "ServicePlan" not in all_sheets:
@@ -385,61 +387,63 @@ def check_machine_status(card_num, current_tons, all_sheets):
         mask = (card_df.get("Min_Tones", 0).fillna(0) <= slice_max) & (card_df.get("Max_Tones", 0).fillna(0) >= slice_min)
         matching_rows = card_df[mask]
 
-        done_services_set = set()
-        last_date = "-"
-        last_tons = "-"
-        last_other = "-"
-        last_servised_by = "-"
-
         if not matching_rows.empty:
-            ignore_cols = {"card", "Tones", "Min_Tones", "Max_Tones", "Date", "Other", "Servised by"}
-            for _, r in matching_rows.iterrows():
+            # نمر على كل صف (حدث) في الصفوف المطابقة
+            for _, row in matching_rows.iterrows():
+                done_services_set = set()
+                
+                # تحديد الأعمدة التي تحتوي على خدمات منجزة
+                ignore_cols = {"card", "Tones", "Min_Tones", "Max_Tones", "Date", "Other", "Servised by", "Event", "Correction"}
                 for col in matching_rows.columns:
                     if col not in ignore_cols:
-                        val = str(r.get(col, "")).strip()
+                        val = str(row.get(col, "")).strip()
                         if val and val.lower() not in ["nan", "none", ""]:
                             done_services_set.add(col)
-            # قراءة آخر تاريخ
-            if "Date" in matching_rows.columns:
-                try:
-                    cleaned_dates = matching_rows["Date"].astype(str).str.replace("\\", "/", regex=False)
-                    dates = pd.to_datetime(cleaned_dates, errors="coerce", dayfirst=True)
-                    if dates.notna().any():
-                        idx = dates.idxmax()
-                        last_date = dates.loc[idx].strftime("%d/%m/%Y")
-                except:
-                    last_date = "-"
-            # آخر طن
-            if "Tones" in matching_rows.columns:
-                tons_vals = pd.to_numeric(matching_rows["Tones"], errors="coerce")
-                if tons_vals.notna().any():
-                    last_tons = int(tons_vals.max())
-            # Other
-            if "Other" in matching_rows.columns:
-                last_other = str(matching_rows["Other"].dropna().iloc[-1]) if matching_rows["Other"].notna().any() else "-"
-            # Servised by
-            if "Servised by" in matching_rows.columns:
-                last_servised_by = str(matching_rows["Servised by"].dropna().iloc[-1]) if matching_rows["Servised by"].notna().any() else "-"
 
-        done_services = sorted(list(done_services_set))
-        done_norm = [normalize_name(c) for c in done_services]
-        not_done = [orig for orig, n in zip(needed_parts, needed_norm) if n not in done_norm]
+                # جمع بيانات الحدث
+                current_date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
+                current_tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
+                current_other = str(row.get("Other", "")).strip() if pd.notna(row.get("Other")) else "-"
+                current_servised_by = str(row.get("Servised by", "")).strip() if pd.notna(row.get("Servised by")) else "-"
+                current_event = str(row.get("Event", "")).strip() if pd.notna(row.get("Event")) else "-"
+                current_correction = str(row.get("Correction", "")).strip() if pd.notna(row.get("Correction")) else "-"
 
-        all_results.append({
-            "Min_Tons": slice_min,
-            "Max_Tons": slice_max,
-            "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
-            "Done Services": ", ".join(done_services) if done_services else "-",
-            "Not Done Services": ", ".join(not_done) if not_done else "-",
-            "Last Date": last_date,
-            "Last Tones": last_tons,
-            "Other": last_other,
-            "Servised by": last_servised_by
-        })
+                done_services = sorted(list(done_services_set))
+                done_norm = [normalize_name(c) for c in done_services]
+                not_done = [orig for orig, n in zip(needed_parts, needed_norm) if n not in done_norm]
+
+                all_results.append({
+                    "Card Number": card_num,
+                    "Min_Tons": slice_min,
+                    "Max_Tons": slice_max,
+                    "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
+                    "Service Done": ", ".join(done_services) if done_services else "-",
+                    "Service Didn't Done": ", ".join(not_done) if not_done else "-",
+                    "Tones": current_tones,
+                    "Event": current_event,
+                    "Correction": current_correction,
+                    "Servised by": current_servised_by,
+                    "Date": current_date
+                })
+        else:
+            # إذا لم توجد أحداث، نضيف سجل للشريحة بدون خدمات منجزة
+            all_results.append({
+                "Card Number": card_num,
+                "Min_Tons": slice_min,
+                "Max_Tons": slice_max,
+                "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
+                "Service Done": "-",
+                "Service Didn't Done": ", ".join(needed_parts) if needed_parts else "-",
+                "Tones": "-",
+                "Event": "-",
+                "Correction": "-",
+                "Servised by": "-",
+                "Date": "-"
+            })
 
     result_df = pd.DataFrame(all_results).dropna(how="all").reset_index(drop=True)
 
-    st.markdown("### 📋 نتائج الفحص")
+    st.markdown("### 📋 نتائج الفحص - جميع الأحداث")
     st.dataframe(result_df.style.apply(style_table, axis=1), use_container_width=True)
 
     # تنزيل النتائج
@@ -495,7 +499,14 @@ sheets_edit = load_sheets_for_edit()
 # واجهة التبويبات الرئيسية
 st.title("🏭 CMMS - Bail Yarn")
 
-tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات (GitHub)","⚙ إدارة المستخدمين"])
+# التحقق من الصلاحيات لعرض التبويبات المناسبة
+username = st.session_state.get("username")
+is_admin = username == "admin"
+
+if is_admin:
+    tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات (GitHub)","⚙ إدارة المستخدمين"])
+else:
+    tabs = st.tabs(["📊 عرض وفحص الماكينات"])
 
 # -------------------------------
 # Tab: عرض وفحص الماكينات (الكود الأول)
@@ -518,270 +529,261 @@ with tabs[0]:
             check_machine_status(st.session_state.card_num_main, st.session_state.current_tons_main, all_sheets)
 
 # -------------------------------
-# Tab: تعديل وإدارة البيانات (الكود الثاني)
+# Tab: تعديل وإدارة البيانات (الكود الثاني) - للمسؤول فقط
 # -------------------------------
-with tabs[1]:
-    st.header("🛠 تعديل وإدارة البيانات (GitHub)")
+if is_admin and len(tabs) > 1:
+    with tabs[1]:
+        st.header("🛠 تعديل وإدارة البيانات (GitHub)")
 
-    # تحقق صلاحية الرفع: إما admin أو يوجد توكين في secrets وPyGithub متاح
-    username = st.session_state.get("username")
-    token_exists = bool(st.secrets.get("github", {}).get("token", None))
-    can_push = (username == "admin") or (token_exists and GITHUB_AVAILABLE)
+        # تحقق صلاحية الرفع
+        token_exists = bool(st.secrets.get("github", {}).get("token", None))
+        can_push = token_exists and GITHUB_AVAILABLE
 
-    if sheets_edit is None:
-        st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
-    else:
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "عرض وتعديل شيت",
-            "إضافة صف جديد (أحداث متتالية)",
-            "إضافة عمود جديد",
-            "🗑 حذف صف"
-        ])
+        if sheets_edit is None:
+            st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
+        else:
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "عرض وتعديل شيت",
+                "إضافة صف جديد (أحداث متتالية)",
+                "إضافة عمود جديد",
+                "🗑 حذف صف"
+            ])
 
-        # -------------------------------
-        # Tab 1: تعديل بيانات وعرض
-        # -------------------------------
-        with tab1:
-            st.subheader("✏ تعديل البيانات")
-            sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
-            df = sheets_edit[sheet_name].astype(str)
+            # -------------------------------
+            # Tab 1: تعديل بيانات وعرض
+            # -------------------------------
+            with tab1:
+                st.subheader("✏ تعديل البيانات")
+                sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
+                df = sheets_edit[sheet_name].astype(str)
 
-            edited_df = st.data_editor(df, num_rows="dynamic")
+                edited_df = st.data_editor(df, num_rows="dynamic")
 
-            if st.button("💾 حفظ التعديلات", key=f"save_edit_{sheet_name}"):
-                # فقط users المصرح لهم
-                if not can_push:
-                    st.warning("🚫 لا تملك صلاحية الرفع إلى GitHub من هذه الجلسة.")
-                sheets_edit[sheet_name] = edited_df.astype(object)
-                new_sheets = save_local_excel_and_push(
-                    sheets_edit,
-                    commit_message=f"Edit sheet {sheet_name} by {st.session_state.get('username')}"
-                )
-                if isinstance(new_sheets, dict):
-                    sheets_edit = new_sheets
-                st.dataframe(sheets_edit[sheet_name])
+                if st.button("💾 حفظ التعديلات", key=f"save_edit_{sheet_name}"):
+                    if not can_push:
+                        st.warning("🚫 لا تملك صلاحية الرفع إلى GitHub من هذه الجلسة.")
+                    sheets_edit[sheet_name] = edited_df.astype(object)
+                    new_sheets = save_local_excel_and_push(
+                        sheets_edit,
+                        commit_message=f"Edit sheet {sheet_name} by {st.session_state.get('username')}"
+                    )
+                    if isinstance(new_sheets, dict):
+                        sheets_edit = new_sheets
+                    st.dataframe(sheets_edit[sheet_name])
 
-        # -------------------------------
-        # Tab 2: إضافة صف جديد (أحداث متعددة بنفس الرينج)
-        # -------------------------------
-        with tab2:
-            st.subheader("➕ إضافة صف جديد (سجل حدث جديد داخل نفس الرينج)")
-            sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-            df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-            st.markdown("أدخل بيانات الحدث (يمكنك إدخال أي نص/أرقام/تواريخ)")
+            # -------------------------------
+            # Tab 2: إضافة صف جديد (أحداث متعددة بنفس الرينج)
+            # -------------------------------
+            with tab2:
+                st.subheader("➕ إضافة صف جديد (سجل حدث جديد داخل نفس الرينج)")
+                sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+                df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+                st.markdown("أدخل بيانات الحدث (يمكنك إدخال أي نص/أرقام/تواريخ)")
 
-            new_data = {}
-            for col in df_add.columns:
-                new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
+                new_data = {}
+                for col in df_add.columns:
+                    new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
 
-            if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}"):
+                if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}"):
 
-                new_row_df = pd.DataFrame([new_data]).astype(str)
+                    new_row_df = pd.DataFrame([new_data]).astype(str)
 
-                # البحث عن أعمدة الرينج
-                min_col, max_col, card_col = None, None, None
-                for c in df_add.columns:
-                    c_low = c.strip().lower()
-                    if c_low in ("min_tones", "min_tone", "min tones", "min"):
-                        min_col = c
-                    if c_low in ("max_tones", "max_tone", "max tones", "max"):
-                        max_col = c
-                    if c_low in ("card", "machine", "machine_no", "machine id"):
-                        card_col = c
+                    # البحث عن أعمدة الرينج
+                    min_col, max_col, card_col = None, None, None
+                    for c in df_add.columns:
+                        c_low = c.strip().lower()
+                        if c_low in ("min_tones", "min_tone", "min tones", "min"):
+                            min_col = c
+                        if c_low in ("max_tones", "max_tone", "max tones", "max"):
+                            max_col = c
+                        if c_low in ("card", "machine", "machine_no", "machine id"):
+                            card_col = c
 
-                if not min_col or not max_col:
-                    st.error("⚠ لم يتم العثور على أعمدة Min_Tones و/أو Max_Tones في الشيت.")
-                else:
-                    def to_num_or_none(x):
-                        try:
-                            return float(x)
-                        except:
-                            return None
+                    if not min_col or not max_col:
+                        st.error("⚠ لم يتم العثور على أعمدة Min_Tones و/أو Max_Tones في الشيت.")
+                    else:
+                        def to_num_or_none(x):
+                            try:
+                                return float(x)
+                            except:
+                                return None
 
-                    new_min_raw = str(new_data.get(min_col, "")).strip()
-                    new_max_raw = str(new_data.get(max_col, "")).strip()
-                    new_min_num = to_num_or_none(new_min_raw)
-                    new_max_num = to_num_or_none(new_max_raw)
+                        new_min_raw = str(new_data.get(min_col, "")).strip()
+                        new_max_raw = str(new_data.get(max_col, "")).strip()
+                        new_min_num = to_num_or_none(new_min_raw)
+                        new_max_num = to_num_or_none(new_max_raw)
 
-                    # البحث عن موضع الإدراج
-                    insert_pos = len(df_add)
-                    mask = pd.Series([False] * len(df_add))
+                        # البحث عن موضع الإدراج
+                        insert_pos = len(df_add)
+                        mask = pd.Series([False] * len(df_add))
 
-                    if card_col:
-                        new_card = str(new_data.get(card_col, "")).strip()
-                        if new_card != "":
+                        if card_col:
+                            new_card = str(new_data.get(card_col, "")).strip()
+                            if new_card != "":
+                                if new_min_num is not None and new_max_num is not None:
+                                    mask = (
+                                        (df_add[card_col].astype(str).str.strip() == new_card) &
+                                        (pd.to_numeric(df_add[min_col], errors='coerce') == new_min_num) &
+                                        (pd.to_numeric(df_add[max_col], errors='coerce') == new_max_num)
+                                    )
+                                else:
+                                    mask = (
+                                        (df_add[card_col].astype(str).str.strip() == new_card) &
+                                        (df_add[min_col].astype(str).str.strip() == new_min_raw) &
+                                        (df_add[max_col].astype(str).str.strip() == new_max_raw)
+                                    )
+                        else:
                             if new_min_num is not None and new_max_num is not None:
                                 mask = (
-                                    (df_add[card_col].astype(str).str.strip() == new_card) &
                                     (pd.to_numeric(df_add[min_col], errors='coerce') == new_min_num) &
                                     (pd.to_numeric(df_add[max_col], errors='coerce') == new_max_num)
                                 )
                             else:
                                 mask = (
-                                    (df_add[card_col].astype(str).str.strip() == new_card) &
                                     (df_add[min_col].astype(str).str.strip() == new_min_raw) &
                                     (df_add[max_col].astype(str).str.strip() == new_max_raw)
                                 )
-                    else:
-                        if new_min_num is not None and new_max_num is not None:
-                            mask = (
-                                (pd.to_numeric(df_add[min_col], errors='coerce') == new_min_num) &
-                                (pd.to_numeric(df_add[max_col], errors='coerce') == new_max_num)
-                            )
+
+                        if mask.any():
+                            insert_pos = mask[mask].index[-1] + 1
                         else:
-                            mask = (
-                                (df_add[min_col].astype(str).str.strip() == new_min_raw) &
-                                (df_add[max_col].astype(str).str.strip() == new_max_raw)
+                            try:
+                                df_add["_min_num"] = pd.to_numeric(df_add[min_col], errors='coerce').fillna(-1)
+                                if new_min_num is not None:
+                                    insert_pos = int((df_add["_min_num"] < new_min_num).sum())
+                                else:
+                                    insert_pos = len(df_add)
+                                df_add = df_add.drop(columns=["_min_num"])
+                            except Exception:
+                                insert_pos = len(df_add)
+
+                        df_top = df_add.iloc[:insert_pos].reset_index(drop=True)
+                        df_bottom = df_add.iloc[insert_pos:].reset_index(drop=True)
+                        df_new = pd.concat(
+                            [df_top, new_row_df.reset_index(drop=True), df_bottom],
+                            ignore_index=True
+                        )
+
+                        sheets_edit[sheet_name_add] = df_new.astype(object)
+
+                        if not can_push:
+                            st.warning("🚫 لا تملك صلاحية الرفع (التغييرات ستبقى محلياً).")
+                            # فقط اكتب الملف محلياً
+                            with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
+                                for name, sh in sheets_edit.items():
+                                    try:
+                                        sh.to_excel(writer, sheet_name=name, index=False)
+                                    except:
+                                        sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+                            st.success("✅ تم إدراج الصف محليًا (لم يتم رفعه إلى GitHub).")
+                            st.dataframe(sheets_edit[sheet_name_add])
+                        else:
+                            new_sheets = save_local_excel_and_push(
+                                sheets_edit,
+                                commit_message=f"Add new row under range {new_min_raw}-{new_max_raw} in {sheet_name_add} by {st.session_state.get('username')}"
                             )
+                            if isinstance(new_sheets, dict):
+                                sheets_edit = new_sheets
+                            st.success("✅ تم الإضافة — تم إدراج الصف في الموقع المناسب.")
+                            st.dataframe(sheets_edit[sheet_name_add])
 
-                    st.write("DEBUG: new_min_raw, new_max_raw:", new_min_raw, new_max_raw)
-                    st.write("DEBUG: Found match count:", int(mask.sum()) if hasattr(mask, "sum") else 0)
+            # -------------------------------
+            # Tab 3: إضافة عمود جديد
+            # -------------------------------
+            with tab3:
+                st.subheader("🆕 إضافة عمود جديد")
+                sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
+                df_col = sheets_edit[sheet_name_col].astype(str)
+                new_col_name = st.text_input("اسم العمود الجديد:")
+                default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "")
 
-                    if mask.any():
-                        insert_pos = mask[mask].index[-1] + 1
+                if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}"):
+                    if new_col_name:
+                        df_col[new_col_name] = default_value
+                        sheets_edit[sheet_name_col] = df_col.astype(object)
+                        if not can_push:
+                            # حفظ محليًا فقط
+                            with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
+                                for name, sh in sheets_edit.items():
+                                    try:
+                                        sh.to_excel(writer, sheet_name=name, index=False)
+                                    except:
+                                        sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+                            st.success("✅ تم إضافة العمود محليًا (لم يتم رفعه إلى GitHub).")
+                            st.dataframe(sheets_edit[sheet_name_col])
+                        else:
+                            new_sheets = save_local_excel_and_push(
+                                sheets_edit,
+                                commit_message=f"Add new column '{new_col_name}' to {sheet_name_col} by {st.session_state.get('username')}"
+                            )
+                            if isinstance(new_sheets, dict):
+                                sheets_edit = new_sheets
+                            st.success("✅ تم إضافة العمود الجديد بنجاح!")
+                            st.dataframe(sheets_edit[sheet_name_col])
+                    else:
+                        st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
+
+            # -------------------------------
+            # Tab 4: حذف صف
+            # -------------------------------
+            with tab4:
+                st.subheader("🗑 حذف صف من الشيت")
+                sheet_name_del = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="delete_sheet")
+                df_del = sheets_edit[sheet_name_del].astype(str).reset_index(drop=True)
+
+                st.markdown("### 📋 بيانات الشيت الحالية")
+                st.dataframe(df_del)
+
+                st.markdown("### ✏ اختر الصفوف التي تريد حذفها (برقم الصف):")
+                st.write("💡 ملاحظة: رقم الصف يبدأ من 0 (أول صف = 0)")
+
+                rows_to_delete = st.text_input("أدخل أرقام الصفوف مفصولة بفاصلة (مثلاً: 0,2,5):")
+                confirm_delete = st.checkbox("✅ أؤكد أني أريد حذف هذه الصفوف بشكل نهائي")
+
+                if st.button("🗑 تنفيذ الحذف", key=f"delete_rows_{sheet_name_del}"):
+                    if rows_to_delete.strip() == "":
+                        st.warning("⚠ الرجاء إدخال رقم الصف أو أكثر.")
+                    elif not confirm_delete:
+                        st.warning("⚠ برجاء تأكيد الحذف أولاً بوضع علامة ✅ قبل التنفيذ.")
                     else:
                         try:
-                            df_add["_min_num"] = pd.to_numeric(df_add[min_col], errors='coerce').fillna(-1)
-                            if new_min_num is not None:
-                                insert_pos = int((df_add["_min_num"] < new_min_num).sum())
+                            rows_list = [int(x.strip()) for x in rows_to_delete.split(",") if x.strip().isdigit()]
+                            rows_list = [r for r in rows_list if 0 <= r < len(df_del)]
+
+                            if not rows_list:
+                                st.warning("⚠ لم يتم العثور على صفوف صحيحة.")
                             else:
-                                insert_pos = len(df_add)
-                            df_add = df_add.drop(columns=["_min_num"])
-                        except Exception:
-                            insert_pos = len(df_add)
+                                df_new = df_del.drop(rows_list).reset_index(drop=True)
+                                sheets_edit[sheet_name_del] = df_new.astype(object)
 
-                    df_top = df_add.iloc[:insert_pos].reset_index(drop=True)
-                    df_bottom = df_add.iloc[insert_pos:].reset_index(drop=True)
-                    df_new = pd.concat(
-                        [df_top, new_row_df.reset_index(drop=True), df_bottom],
-                        ignore_index=True
-                    )
-
-                    sheets_edit[sheet_name_add] = df_new.astype(object)
-
-                    if not can_push:
-                        st.warning("🚫 لا تملك صلاحية الرفع (التغييرات ستبقى محلياً).")
-                        # فقط اكتب الملف محلياً
-                        with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                            for name, sh in sheets_edit.items():
-                                try:
-                                    sh.to_excel(writer, sheet_name=name, index=False)
-                                except:
-                                    sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                        st.success("✅ تم إدراج الصف محليًا (لم يتم رفعه إلى GitHub).")
-                        st.dataframe(sheets_edit[sheet_name_add])
-                    else:
-                        new_sheets = save_local_excel_and_push(
-                            sheets_edit,
-                            commit_message=f"Add new row under range {new_min_raw}-{new_max_raw} in {sheet_name_add} by {st.session_state.get('username')}"
-                        )
-                        if isinstance(new_sheets, dict):
-                            sheets_edit = new_sheets
-                        st.success("✅ تم الإضافة — تم إدراج الصف في الموقع المناسب.")
-                        st.dataframe(sheets_edit[sheet_name_add])
-
-        # -------------------------------
-        # Tab 3: إضافة عمود جديد
-        # -------------------------------
-        with tab3:
-            st.subheader("🆕 إضافة عمود جديد")
-            sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
-            df_col = sheets_edit[sheet_name_col].astype(str)
-            new_col_name = st.text_input("اسم العمود الجديد:")
-            default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "")
-
-            if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}"):
-                if new_col_name:
-                    df_col[new_col_name] = default_value
-                    sheets_edit[sheet_name_col] = df_col.astype(object)
-                    if not can_push:
-                        # حفظ محليًا فقط
-                        with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                            for name, sh in sheets_edit.items():
-                                try:
-                                    sh.to_excel(writer, sheet_name=name, index=False)
-                                except:
-                                    sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                        st.success("✅ تم إضافة العمود محليًا (لم يتم رفعه إلى GitHub).")
-                        st.dataframe(sheets_edit[sheet_name_col])
-                    else:
-                        new_sheets = save_local_excel_and_push(
-                            sheets_edit,
-                            commit_message=f"Add new column '{new_col_name}' to {sheet_name_col} by {st.session_state.get('username')}"
-                        )
-                        if isinstance(new_sheets, dict):
-                            sheets_edit = new_sheets
-                        st.success("✅ تم إضافة العمود الجديد بنجاح!")
-                        st.dataframe(sheets_edit[sheet_name_col])
-                else:
-                    st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
-
-        # -------------------------------
-        # Tab 4: حذف صف
-        # -------------------------------
-        with tab4:
-            st.subheader("🗑 حذف صف من الشيت")
-            sheet_name_del = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="delete_sheet")
-            df_del = sheets_edit[sheet_name_del].astype(str).reset_index(drop=True)
-
-            st.markdown("### 📋 بيانات الشيت الحالية")
-            st.dataframe(df_del)
-
-            st.markdown("### ✏ اختر الصفوف التي تريد حذفها (برقم الصف):")
-            st.write("💡 ملاحظة: رقم الصف يبدأ من 0 (أول صف = 0)")
-
-            rows_to_delete = st.text_input("أدخل أرقام الصفوف مفصولة بفاصلة (مثلاً: 0,2,5):")
-            confirm_delete = st.checkbox("✅ أؤكد أني أريد حذف هذه الصفوف بشكل نهائي")
-
-            if st.button("🗑 تنفيذ الحذف", key=f"delete_rows_{sheet_name_del}"):
-                if rows_to_delete.strip() == "":
-                    st.warning("⚠ الرجاء إدخال رقم الصف أو أكثر.")
-                elif not confirm_delete:
-                    st.warning("⚠ برجاء تأكيد الحذف أولاً بوضع علامة ✅ قبل التنفيذ.")
-                else:
-                    try:
-                        rows_list = [int(x.strip()) for x in rows_to_delete.split(",") if x.strip().isdigit()]
-                        rows_list = [r for r in rows_list if 0 <= r < len(df_del)]
-
-                        if not rows_list:
-                            st.warning("⚠ لم يتم العثور على صفوف صحيحة.")
-                        else:
-                            df_new = df_del.drop(rows_list).reset_index(drop=True)
-                            sheets_edit[sheet_name_del] = df_new.astype(object)
-
-                            if not can_push:
-                                # حفظ محليًا فقط
-                                with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                                    for name, sh in sheets_edit.items():
-                                        try:
-                                            sh.to_excel(writer, sheet_name=name, index=False)
-                                        except:
-                                            sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                                st.success(f"✅ تم حذف الصفوف التالية محليًا: {rows_list}")
-                                st.dataframe(sheets_edit[sheet_name_del])
-                            else:
-                                new_sheets = save_local_excel_and_push(sheets_edit, commit_message=f"Delete rows {rows_list} from {sheet_name_del} by {st.session_state.get('username')}")
-                                if isinstance(new_sheets, dict):
-                                    sheets_edit = new_sheets
-                                st.success(f"✅ تم حذف الصفوف التالية بنجاح: {rows_list}")
-                                st.dataframe(sheets_edit[sheet_name_del])
-                    except Exception as e:
-                        st.error(f"حدث خطأ أثناء الحذف: {e}")
+                                if not can_push:
+                                    # حفظ محليًا فقط
+                                    with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
+                                        for name, sh in sheets_edit.items():
+                                            try:
+                                                sh.to_excel(writer, sheet_name=name, index=False)
+                                            except:
+                                                sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+                                    st.success(f"✅ تم حذف الصفوف التالية محليًا: {rows_list}")
+                                    st.dataframe(sheets_edit[sheet_name_del])
+                                else:
+                                    new_sheets = save_local_excel_and_push(sheets_edit, commit_message=f"Delete rows {rows_list} from {sheet_name_del} by {st.session_state.get('username')}")
+                                    if isinstance(new_sheets, dict):
+                                        sheets_edit = new_sheets
+                                    st.success(f"✅ تم حذف الصفوف التالية بنجاح: {rows_list}")
+                                    st.dataframe(sheets_edit[sheet_name_del])
+                        except Exception as e:
+                            st.error(f"حدث خطأ أثناء الحذف: {e}")
 
 # -------------------------------
-# Tab: إدارة المستخدمين
+# Tab: إدارة المستخدمين - للمسؤول فقط
 # -------------------------------
-with tabs[2]:
-    st.header("⚙ إدارة المستخدمين")
-    users = load_users()
-    username = st.session_state.get("username")
+if is_admin and len(tabs) > 2:
+    with tabs[2]:
+        st.header("⚙ إدارة المستخدمين")
+        users = load_users()
+        username = st.session_state.get("username")
 
-    # فقط admin يستطيع إدارة المستخدمين عبر الواجهة
-    if username != "admin":
-        st.info("🛑 فقط المستخدم 'admin' يمكنه إدارة المستخدمين عبر هذه الواجهة. تواصل مع المدير لإجراء تغييرات.")
-        st.markdown("*المستخدمين الحاليين:*")
-        st.write(list(users.keys()))
-    else:
         st.subheader("🔐 المستخدمين الموجودين")
         st.dataframe(pd.DataFrame([{"username": k, "password": v.get("password","")} for k,v in users.items()]))
         st.markdown("### ➕ إضافة مستخدم جديد")
@@ -797,7 +799,7 @@ with tabs[2]:
                     users[new_user] = {"password": new_pass}
                     save_users(users)
                     st.success("✅ تم إضافة المستخدم.")
-                    st.experimental_rerun()
+                    st.rerun()
 
         st.markdown("### 🗑 حذف مستخدم")
         del_user = st.selectbox("اختر مستخدم للحذف:", [u for u in users.keys() if u != "admin"])
