@@ -25,11 +25,11 @@ SESSION_DURATION = timedelta(minutes=10)  # مدة الجلسة 10 دقائق
 MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
 
 # إعدادات GitHub (مسارات الملف والريبو)
-REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
+REPO_NAME = "mahmedabdallh123/input-data"  # عدل إذا لزم
 BRANCH = "main"
 FILE_PATH = "Machine_Service_Lookup.xlsx"
 LOCAL_FILE = "Machine_Service_Lookup.xlsx"
-GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/BELYARN/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
+GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/input-data/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
@@ -218,38 +218,78 @@ def fetch_from_github_api():
         st.error(f"⚠ فشل تحميل الملف من GitHub API: {e}")
 
 # -------------------------------
-# 📂 تحميل الشيتات (مخبأ)
+# 📂 تحميل الشيتات (مخبأ) - معدل لقراءة جميع الشيتات
 # -------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_sheets():
+    """تحميل جميع الشيتات من ملف Excel"""
     if not os.path.exists(LOCAL_FILE):
+        st.warning("❌ الملف المحلي غير موجود.")
         return None
-    sheets = pd.read_excel(LOCAL_FILE, sheet_name=None)
-    for name, df in sheets.items():
-        df.columns = df.columns.str.strip()
-    return sheets
+    
+    try:
+        # قراءة جميع الشيتات
+        sheets = pd.read_excel(LOCAL_FILE, sheet_name=None)
+        
+        if not sheets:
+            st.error("❌ لم يتم العثور على أي شيتات في الملف.")
+            return None
+        
+        # تنظيف أسماء الأعمدة لكل شيت
+        for name, df in sheets.items():
+            df.columns = df.columns.astype(str).str.strip()
+        
+        st.success(f"✅ تم تحميل {len(sheets)} شيت بنجاح")
+        st.info(f"📊 أسماء الشيتات: {list(sheets.keys())}")
+        
+        return sheets
+    except Exception as e:
+        st.error(f"❌ خطأ في تحميل الملف: {e}")
+        return None
 
 # نسخة مع dtype=object لواجهة التحرير
 @st.cache_data(show_spinner=False)
 def load_sheets_for_edit():
+    """تحميل جميع الشيتات للتحرير"""
     if not os.path.exists(LOCAL_FILE):
+        st.warning("❌ الملف المحلي غير موجود.")
         return None
-    sheets = pd.read_excel(LOCAL_FILE, sheet_name=None, dtype=object)
-    for name, df in sheets.items():
-        df.columns = df.columns.str.strip()
-    return sheets
+    
+    try:
+        # قراءة جميع الشيتات مع dtype=object للحفاظ على تنسيق البيانات
+        sheets = pd.read_excel(LOCAL_FILE, sheet_name=None, dtype=object)
+        
+        if not sheets:
+            st.error("❌ لم يتم العثور على أي شيتات في الملف.")
+            return None
+        
+        # تنظيف أسماء الأعمدة لكل شيت
+        for name, df in sheets.items():
+            df.columns = df.columns.astype(str).str.strip()
+        
+        st.success(f"✅ تم تحميل {len(sheets)} شيت للتحرير")
+        
+        return sheets
+    except Exception as e:
+        st.error(f"❌ خطأ في تحميل الملف للتحرير: {e}")
+        return None
 
 # -------------------------------
 # 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل
 # -------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
     # احفظ محلياً
-    with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-        for name, sh in sheets_dict.items():
-            try:
-                sh.to_excel(writer, sheet_name=name, index=False)
-            except Exception:
-                sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+    try:
+        with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
+            for name, sh in sheets_dict.items():
+                try:
+                    sh.to_excel(writer, sheet_name=name, index=False)
+                except Exception as e:
+                    st.error(f"⚠ خطأ في حفظ الشيت {name}: {e}")
+                    sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+    except Exception as e:
+        st.error(f"⚠ خطأ أثناء الحفظ المحلي: {e}")
+        return load_sheets_for_edit()
 
     # امسح الكاش
     try:
@@ -329,14 +369,28 @@ def style_table(row):
 # 🖥 دالة فحص الماكينة - معدلة لعرض جميع الأحداث
 # -------------------------------
 def check_machine_status(card_num, current_tons, all_sheets):
-    if not all_sheets or "ServicePlan" not in all_sheets:
+    if not all_sheets:
+        st.error("❌ لم يتم تحميل أي شيتات.")
+        return
+    
+    # عرض جميع الشيتات المتاحة
+    st.info(f"📂 الشيتات المتاحة: {list(all_sheets.keys())}")
+    
+    if "ServicePlan" not in all_sheets:
         st.error("❌ الملف لا يحتوي على شيت ServicePlan.")
         return
+    
     service_plan_df = all_sheets["ServicePlan"]
     card_sheet_name = f"Card{card_num}"
+    
     if card_sheet_name not in all_sheets:
         st.warning(f"⚠ لا يوجد شيت باسم {card_sheet_name}")
+        # عرض الشيتات المتاحة التي تبدأ بـ "Card"
+        card_sheets = [name for name in all_sheets.keys() if name.startswith('Card')]
+        if card_sheets:
+            st.info(f"📋 الشيتات المتاحة التي تبدأ بـ 'Card': {card_sheets}")
         return
+    
     card_df = all_sheets[card_sheet_name]
 
     # نطاق العرض
@@ -484,7 +538,16 @@ with st.sidebar:
         fetch_from_github_requests()
     if st.button("🔄 تحديث الملف من GitHub (API)"):
         fetch_from_github_api()
-    st.markdown("ملحوظة: تحميل الـ RAW يعمل بدون توكين، لكن الرفع يحتاج توكين في secrets.")
+    
+    # زر مسح الكاش
+    if st.button("🗑 مسح الكاش وإعادة التحميل"):
+        try:
+            st.cache_data.clear()
+            st.success("✅ تم مسح الكاش بنجاح!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ خطأ في مسح الكاش: {e}")
+    
     st.markdown("---")
     # زر لإعادة تسجيل الخروج
     if st.button("🚪 تسجيل الخروج"):
@@ -509,13 +572,18 @@ else:
     tabs = st.tabs(["📊 عرض وفحص الماكينات"])
 
 # -------------------------------
-# Tab: عرض وفحص الماكينات (الكود الأول)
+# Tab: عرض وفحص الماكينات
 # -------------------------------
 with tabs[0]:
     st.header("📊 عرض وفحص الماكينات")
+    
     if all_sheets is None:
         st.warning("❗ الملف المحلي غير موجود. استخدم أحد أزرار التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
     else:
+        # عرض معلومات عن الشيتات المحملة
+        st.success(f"✅ تم تحميل {len(all_sheets)} شيت بنجاح")
+        st.info(f"📋 أسماء الشيتات: {list(all_sheets.keys())}")
+        
         col1, col2 = st.columns(2)
         with col1:
             card_num = st.number_input("رقم الماكينة:", min_value=1, step=1, key="card_num_main")
@@ -526,10 +594,10 @@ with tabs[0]:
             st.session_state["show_results"] = True
 
         if st.session_state.get("show_results", False):
-            check_machine_status(st.session_state.card_num_main, st.session_state.current_tons_main, all_sheets)
+            check_machine_status(card_num, current_tons, all_sheets)
 
 # -------------------------------
-# Tab: تعديل وإدارة البيانات (الكود الثاني) - للمسؤول فقط
+# Tab: تعديل وإدارة البيانات - للمسؤول فقط
 # -------------------------------
 if is_admin and len(tabs) > 1:
     with tabs[1]:
@@ -542,6 +610,9 @@ if is_admin and len(tabs) > 1:
         if sheets_edit is None:
             st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
         else:
+            # عرض معلومات عن الشيتات المحملة للتحرير
+            st.success(f"✅ تم تحميل {len(sheets_edit)} شيت للتحرير")
+            
             tab1, tab2, tab3, tab4 = st.tabs([
                 "عرض وتعديل شيت",
                 "إضافة صف جديد (أحداث متتالية)",
@@ -557,19 +628,22 @@ if is_admin and len(tabs) > 1:
                 sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
                 df = sheets_edit[sheet_name].astype(str)
 
-                edited_df = st.data_editor(df, num_rows="dynamic")
+                st.info(f"📊 تعديل شيت: {sheet_name} - عدد الصفوف: {len(df)}")
+                edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
                 if st.button("💾 حفظ التعديلات", key=f"save_edit_{sheet_name}"):
                     if not can_push:
                         st.warning("🚫 لا تملك صلاحية الرفع إلى GitHub من هذه الجلسة.")
-                    sheets_edit[sheet_name] = edited_df.astype(object)
-                    new_sheets = save_local_excel_and_push(
-                        sheets_edit,
-                        commit_message=f"Edit sheet {sheet_name} by {st.session_state.get('username')}"
-                    )
-                    if isinstance(new_sheets, dict):
-                        sheets_edit = new_sheets
-                    st.dataframe(sheets_edit[sheet_name])
+                    else:
+                        sheets_edit[sheet_name] = edited_df.astype(object)
+                        new_sheets = save_local_excel_and_push(
+                            sheets_edit,
+                            commit_message=f"Edit sheet {sheet_name} by {st.session_state.get('username')}"
+                        )
+                        if isinstance(new_sheets, dict):
+                            sheets_edit = new_sheets
+                            st.success("✅ تم حفظ التعديلات بنجاح!")
+                        st.dataframe(sheets_edit[sheet_name])
 
             # -------------------------------
             # Tab 2: إضافة صف جديد (أحداث متعددة بنفس الرينج)
@@ -578,11 +652,15 @@ if is_admin and len(tabs) > 1:
                 st.subheader("➕ إضافة صف جديد (سجل حدث جديد داخل نفس الرينج)")
                 sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
                 df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+                
                 st.markdown("أدخل بيانات الحدث (يمكنك إدخال أي نص/أرقام/تواريخ)")
+                st.info(f"📋 عدد الأعمدة في الشيت: {len(df_add.columns)}")
 
                 new_data = {}
-                for col in df_add.columns:
-                    new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
+                cols = st.columns(3)
+                for i, col in enumerate(df_add.columns):
+                    with cols[i % 3]:
+                        new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
 
                 if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}"):
 
@@ -694,6 +772,7 @@ if is_admin and len(tabs) > 1:
                 st.subheader("🆕 إضافة عمود جديد")
                 sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
                 df_col = sheets_edit[sheet_name_col].astype(str)
+                
                 new_col_name = st.text_input("اسم العمود الجديد:")
                 default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "")
 
@@ -732,19 +811,17 @@ if is_admin and len(tabs) > 1:
                 df_del = sheets_edit[sheet_name_del].astype(str).reset_index(drop=True)
 
                 st.markdown("### 📋 بيانات الشيت الحالية")
-                st.dataframe(df_del)
+                st.dataframe(df_del, use_container_width=True)
 
-                st.markdown("### ✏ اختر الصفوف التي تريد حذفها (برقم الصف):")
-                st.write("💡 ملاحظة: رقم الصف يبدأ من 0 (أول صف = 0)")
-
+                st.markdown("### ✏ اختر الصفوف التي تريد حذفها")
                 rows_to_delete = st.text_input("أدخل أرقام الصفوف مفصولة بفاصلة (مثلاً: 0,2,5):")
                 confirm_delete = st.checkbox("✅ أؤكد أني أريد حذف هذه الصفوف بشكل نهائي")
 
                 if st.button("🗑 تنفيذ الحذف", key=f"delete_rows_{sheet_name_del}"):
-                    if rows_to_delete.strip() == "":
+                    if not rows_to_delete.strip():
                         st.warning("⚠ الرجاء إدخال رقم الصف أو أكثر.")
                     elif not confirm_delete:
-                        st.warning("⚠ برجاء تأكيد الحذف أولاً بوضع علامة ✅ قبل التنفيذ.")
+                        st.warning("⚠ برجاء تأكيد الحذف أولاً.")
                     else:
                         try:
                             rows_list = [int(x.strip()) for x in rows_to_delete.split(",") if x.strip().isdigit()]
@@ -785,12 +862,18 @@ if is_admin and len(tabs) > 2:
         username = st.session_state.get("username")
 
         st.subheader("🔐 المستخدمين الموجودين")
-        st.dataframe(pd.DataFrame([{"username": k, "password": v.get("password","")} for k,v in users.items()]))
+        users_df = pd.DataFrame([{"username": k, "password": "••••••••"} for k,v in users.items()])
+        st.dataframe(users_df, use_container_width=True)
+        
         st.markdown("### ➕ إضافة مستخدم جديد")
-        new_user = st.text_input("اسم المستخدم الجديد:")
-        new_pass = st.text_input("كلمة المرور:", type="password")
-        if st.button("إضافة مستخدم"):
-            if new_user.strip() == "" or new_pass.strip() == "":
+        col1, col2 = st.columns(2)
+        with col1:
+            new_user = st.text_input("اسم المستخدم الجديد:")
+        with col2:
+            new_pass = st.text_input("كلمة المرور:", type="password")
+        
+        if st.button("إضافة مستخدم", key="add_user"):
+            if not new_user.strip() or not new_pass.strip():
                 st.warning("الرجاء إدخال اسم وكلمة مرور.")
             else:
                 if new_user in users:
@@ -802,10 +885,13 @@ if is_admin and len(tabs) > 2:
                     st.rerun()
 
         st.markdown("### 🗑 حذف مستخدم")
-        del_user = st.selectbox("اختر مستخدم للحذف:", [u for u in users.keys() if u != "admin"])
-        if st.button("حذف المستخدم"):
-            if del_user in users:
-                users.pop(del_user, None)
-                save_users(users)
-                st.success("✅ تم الحذف.")
-                st.experimental_rerun()
+        if len(users) > 1:  # لا يمكن حذف admin
+            del_user = st.selectbox("اختر مستخدم للحذف:", [u for u in users.keys() if u != "admin"], key="del_user")
+            if st.button("حذف المستخدم", key="delete_user"):
+                if del_user in users:
+                    users.pop(del_user)
+                    save_users(users)
+                    st.success("✅ تم حذف المستخدم.")
+                    st.rerun()
+        else:
+            st.info("لا يمكن حذف المستخدم admin.")
