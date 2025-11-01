@@ -21,8 +21,8 @@ except Exception:
 # ===============================
 USERS_FILE = "users.json"
 STATE_FILE = "state.json"
-SESSION_DURATION = timedelta(minutes=10)  # مدة الجلسة 10 دقائق
-MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
+SESSION_DURATION = timedelta(minutes=15)  # مدة الجلسة 10 دقائق
+MAX_ACTIVE_USERS = 3  # أقصى عدد مستخدمين مسموح
 
 # إعدادات GitHub (مسارات الملف والريبو)
 REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
