@@ -816,7 +816,7 @@ tech_support_tab_index = 1 if not is_admin else 2
 with tabs[tech_support_tab_index]:
     st.header("📞 الدعم الفني")
     
-    st.markdown("""
+    st.markdown(
     ## 🛠 معلومات التطوير والدعم
     
     *تم تطوير هذا التطبيق بواسطة:*
