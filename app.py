@@ -25,19 +25,20 @@ SESSION_DURATION = timedelta(minutes=10)  # مدة الجلسة 10 دقائق
 MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
 
 # إعدادات GitHub (مسارات الملف والريبو)
-REPO_NAME = "mahmedabdallh123/input-data"  # عدل إذا لزم
+REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
 BRANCH = "main"
 FILE_PATH = "Machine_Service_Lookup.xlsx"
 LOCAL_FILE = "Machine_Service_Lookup.xlsx"
-GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/input-data/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
+GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/BELYARN/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
 # -------------------------------
 def load_users():
+    """تحميل بيانات المستخدمين من ملف JSON"""
     if not os.path.exists(USERS_FILE):
         # انشئ ملف افتراضي اذا مش موجود (يوجد admin بكلمة مرور افتراضية "admin" — غيرها فورًا)
-        default = {"admin": {"password": "admin"}}
+        default = {"admin": {"password": "admin", "role": "admin", "created_at": datetime.now().isoformat()}}
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(default, f, indent=4, ensure_ascii=False)
         return default
@@ -46,11 +47,17 @@ def load_users():
             return json.load(f)
     except Exception as e:
         st.error(f"❌ خطأ في ملف users.json: {e}")
-        st.stop()
+        return {"admin": {"password": "admin", "role": "admin", "created_at": datetime.now().isoformat()}}
 
 def save_users(users):
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=4, ensure_ascii=False)
+    """حفظ بيانات المستخدمين إلى ملف JSON"""
+    try:
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        st.error(f"❌ خطأ في حفظ ملف users.json: {e}")
+        return False
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -265,6 +272,7 @@ def load_sheets_for_edit():
 # 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل
 # -------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
+    """دالة محسنة للحفظ التلقائي المحلي والرفع إلى GitHub"""
     # احفظ محلياً
     try:
         with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
@@ -275,7 +283,7 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
                     sh.astype(object).to_excel(writer, sheet_name=name, index=False)
     except Exception as e:
         st.error(f"⚠ خطأ أثناء الحفظ المحلي: {e}")
-        return load_sheets_for_edit()
+        return None
 
     # امسح الكاش
     try:
@@ -286,9 +294,11 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     # حاول الرفع عبر PyGithub token في secrets
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
+        st.warning("⚠ لم يتم العثور على GitHub token. سيتم الحفظ محلياً فقط.")
         return load_sheets_for_edit()
 
     if not GITHUB_AVAILABLE:
+        st.warning("⚠ PyGithub غير متوفر. سيتم الحفظ محلياً فقط.")
         return load_sheets_for_edit()
 
     try:
@@ -299,17 +309,35 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
 
         try:
             contents = repo.get_contents(FILE_PATH, ref=BRANCH)
-            repo.update_file(path=FILE_PATH, message=commit_message, content=content, sha=contents.sha, branch=BRANCH)
-        except Exception:
+            result = repo.update_file(path=FILE_PATH, message=commit_message, content=content, sha=contents.sha, branch=BRANCH)
+            st.success(f"✅ تم الحفظ والرفع إلى GitHub بنجاح: {commit_message}")
+            return load_sheets_for_edit()
+        except Exception as e:
             # حاول رفع كملف جديد أو إنشاء
             try:
-                repo.create_file(path=FILE_PATH, message=commit_message, content=content, branch=BRANCH)
-            except Exception:
+                result = repo.create_file(path=FILE_PATH, message=commit_message, content=content, branch=BRANCH)
+                st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
                 return load_sheets_for_edit()
+            except Exception as create_error:
+                st.error(f"❌ فشل إنشاء ملف جديد على GitHub: {create_error}")
+                return None
 
-        return load_sheets_for_edit()
-    except Exception:
-        return load_sheets_for_edit()
+    except Exception as e:
+        st.error(f"❌ فشل الرفع إلى GitHub: {e}")
+        return None
+
+def auto_save_to_github(sheets_dict, operation_description):
+    """دالة الحفظ التلقائي المحسنة"""
+    username = st.session_state.get("username", "unknown")
+    commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    result = save_local_excel_and_push(sheets_dict, commit_message)
+    if result is not None:
+        st.success("✅ تم حفظ التغييرات تلقائياً في GitHub")
+        return result
+    else:
+        st.error("❌ فشل الحفظ التلقائي")
+        return sheets_dict
 
 # -------------------------------
 # 🧰 دوال مساعدة للمعالجة والنصوص
@@ -540,7 +568,7 @@ is_admin = username == "admin"
 
 # تحديد التبويبات بناءً على نوع المستخدم
 if is_admin:
-    tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات", "📞 الدعم الفني"])
+    tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"])
 else:
     tabs = st.tabs(["📊 عرض وفحص الماكينات", "📞 الدعم الفني"])
 
@@ -581,36 +609,37 @@ if is_admin and len(tabs) > 1:
         else:
             tab1, tab2, tab3, tab4 = st.tabs([
                 "عرض وتعديل شيت",
-                "إضافة صف جديد",
+                "إضافة صف جديد", 
                 "إضافة عمود جديد",
                 "🗑 حذف صف"
             ])
 
             # -------------------------------
-            # Tab 1: تعديل بيانات وعرض
+            # Tab 1: تعديل بيانات وعرض - معدل للحفظ التلقائي
             # -------------------------------
             with tab1:
                 st.subheader("✏ تعديل البيانات")
                 sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
                 df = sheets_edit[sheet_name].astype(str)
 
-                edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
-
-                if st.button("💾 حفظ التعديلات", key=f"save_edit_{sheet_name}"):
-                    if not can_push:
-                        st.warning("🚫 لا تملك صلاحية الرفع إلى GitHub من هذه الجلسة.")
-                    else:
-                        sheets_edit[sheet_name] = edited_df.astype(object)
-                        new_sheets = save_local_excel_and_push(
-                            sheets_edit,
-                            commit_message=f"Edit sheet {sheet_name} by {st.session_state.get('username')}"
-                        )
-                        if isinstance(new_sheets, dict):
-                            sheets_edit = new_sheets
-                        st.dataframe(sheets_edit[sheet_name])
+                # استخدام data_editor مع التعديل التلقائي
+                edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, 
+                                         key=f"editor_{sheet_name}")
+                
+                # حفظ تلقائي عند التعديل
+                if not edited_df.equals(df):
+                    st.info("🔄 يتم حفظ التغييرات تلقائياً...")
+                    sheets_edit[sheet_name] = edited_df.astype(object)
+                    new_sheets = auto_save_to_github(
+                        sheets_edit, 
+                        f"تعديل تلقائي في شيت {sheet_name}"
+                    )
+                    if new_sheets is not None:
+                        sheets_edit = new_sheets
+                        st.rerun()
 
             # -------------------------------
-            # Tab 2: إضافة صف جديد (أحداث متعددة بنفس الرينج)
+            # Tab 2: إضافة صف جديد - معدل للحفظ التلقائي
             # -------------------------------
             with tab2:
                 st.subheader("➕ إضافة صف جديد")
@@ -626,7 +655,6 @@ if is_admin and len(tabs) > 1:
                         new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
 
                 if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}"):
-
                     new_row_df = pd.DataFrame([new_data]).astype(str)
 
                     # البحث عن أعمدة الرينج
@@ -707,27 +735,17 @@ if is_admin and len(tabs) > 1:
 
                         sheets_edit[sheet_name_add] = df_new.astype(object)
 
-                        if not can_push:
-                            st.warning("🚫 لا تملك صلاحية الرفع (التغييرات ستبقى محلياً).")
-                            # فقط اكتب الملف محلياً
-                            with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                                for name, sh in sheets_edit.items():
-                                    try:
-                                        sh.to_excel(writer, sheet_name=name, index=False)
-                                    except:
-                                        sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                            st.dataframe(sheets_edit[sheet_name_add])
-                        else:
-                            new_sheets = save_local_excel_and_push(
-                                sheets_edit,
-                                commit_message=f"Add new row under range {new_min_raw}-{new_max_raw} in {sheet_name_add} by {st.session_state.get('username')}"
-                            )
-                            if isinstance(new_sheets, dict):
-                                sheets_edit = new_sheets
-                            st.dataframe(sheets_edit[sheet_name_add])
+                        # حفظ تلقائي في GitHub
+                        new_sheets = auto_save_to_github(
+                            sheets_edit,
+                            f"إضافة صف جديد في {sheet_name_add} بالرينج {new_min_raw}-{new_max_raw}"
+                        )
+                        if new_sheets is not None:
+                            sheets_edit = new_sheets
+                            st.rerun()
 
             # -------------------------------
-            # Tab 3: إضافة عمود جديد
+            # Tab 3: إضافة عمود جديد - معدل للحفظ التلقائي
             # -------------------------------
             with tab3:
                 st.subheader("🆕 إضافة عمود جديد")
@@ -741,28 +759,20 @@ if is_admin and len(tabs) > 1:
                     if new_col_name:
                         df_col[new_col_name] = default_value
                         sheets_edit[sheet_name_col] = df_col.astype(object)
-                        if not can_push:
-                            # حفظ محليًا فقط
-                            with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                                for name, sh in sheets_edit.items():
-                                    try:
-                                        sh.to_excel(writer, sheet_name=name, index=False)
-                                    except:
-                                        sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                            st.dataframe(sheets_edit[sheet_name_col])
-                        else:
-                            new_sheets = save_local_excel_and_push(
-                                sheets_edit,
-                                commit_message=f"Add new column '{new_col_name}' to {sheet_name_col} by {st.session_state.get('username')}"
-                            )
-                            if isinstance(new_sheets, dict):
-                                sheets_edit = new_sheets
-                            st.dataframe(sheets_edit[sheet_name_col])
+                        
+                        # حفظ تلقائي في GitHub
+                        new_sheets = auto_save_to_github(
+                            sheets_edit,
+                            f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}"
+                        )
+                        if new_sheets is not None:
+                            sheets_edit = new_sheets
+                            st.rerun()
                     else:
                         st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
 
             # -------------------------------
-            # Tab 4: حذف صف
+            # Tab 4: حذف صف - معدل للحفظ التلقائي
             # -------------------------------
             with tab4:
                 st.subheader("🗑 حذف صف من الشيت")
@@ -792,70 +802,154 @@ if is_admin and len(tabs) > 1:
                                 df_new = df_del.drop(rows_list).reset_index(drop=True)
                                 sheets_edit[sheet_name_del] = df_new.astype(object)
 
-                                if not can_push:
-                                    # حفظ محليًا فقط
-                                    with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
-                                        for name, sh in sheets_edit.items():
-                                            try:
-                                                sh.to_excel(writer, sheet_name=name, index=False)
-                                            except:
-                                                sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-                                    st.dataframe(sheets_edit[sheet_name_del])
-                                else:
-                                    new_sheets = save_local_excel_and_push(sheets_edit, commit_message=f"Delete rows {rows_list} from {sheet_name_del} by {st.session_state.get('username')}")
-                                    if isinstance(new_sheets, dict):
-                                        sheets_edit = new_sheets
-                                    st.dataframe(sheets_edit[sheet_name_del])
+                                # حفظ تلقائي في GitHub
+                                new_sheets = auto_save_to_github(
+                                    sheets_edit, 
+                                    f"حذف الصفوف {rows_list} من {sheet_name_del}"
+                                )
+                                if new_sheets is not None:
+                                    sheets_edit = new_sheets
+                                    st.rerun()
                         except Exception as e:
                             st.error(f"حدث خطأ أثناء الحذف: {e}")
-
-# -------------------------------
-# Tab: الدعم الفني - لجميع المستخدمين
-# -------------------------------
-tech_support_tab_index = 1 if not is_admin else 2
-with tabs[tech_support_tab_index]:
-    st.header("📞 الدعم الفني")
-    
-    st.markdown("""
-    ## 🛠 معلومات التطوير والدعم
-    
-    *تم تطوير هذا التطبيق بواسطة:*
-    
-    ### *م. محمد عبدالله*
-    ### *رئيس قسم الكرد والمحطات*
-    ### *مصنع بيل يارن للغزل*
-    
-    ---
-    
-    ### *معلومات الاتصال:*
-    - 📧 البريد الإلكتروني: [m.abdallah@bailyarn.com](mailto:m.abdallah@bailyarn.com)
-    - 📞 هاتف المصنع: 01000000000
-    - 🏢 الموقع: مصنع بيل يارن للغزل
-    
-    ---
-    
-    ### *خدمات الدعم الفني:*
-    - 🔧 صيانة وتحديث النظام
-    - 📊 تطوير تقارير إضافية
-    - 🐛 إصلاح الأخطاء والمشكلات
-    - 💡 استشارات فنية وتقنية
-    
-    ---
-    
-    ### *إصدار التطبيق:*
-    - الإصدار: 2.0
-    - آخر تحديث: 2024
-    - النظام: CMMS - نظام إدارة الصيانة
-    """)
-    
-    st.info("""
-    *ملاحظة:* في حالة مواجهة أي مشاكل تقنية أو تحتاج إلى إضافة ميزات جديدة، 
-    يرجى التواصل مع قسم الدعم الفني.
-    """)
 
 # -------------------------------
 # Tab: إدارة المستخدمين - للمسؤول فقط
 # -------------------------------
 if is_admin and len(tabs) > 2:
-    # إدارة المستخدمين تظهر في تبويب منفصل فقط للمسؤول
-    pass
+    with tabs[2]:
+        st.header("👥 إدارة المستخدمين")
+        
+        users = load_users()
+        
+        # عرض المستخدمين الحاليين
+        st.subheader("📋 المستخدمين الحاليين")
+        
+        if users:
+            # تحويل بيانات المستخدمين إلى DataFrame لعرضها
+            user_data = []
+            for username, info in users.items():
+                user_data.append({
+                    "اسم المستخدم": username,
+                    "الدور": info.get("role", "user"),
+                    "تاريخ الإنشاء": info.get("created_at", "غير معروف")
+                })
+            
+            users_df = pd.DataFrame(user_data)
+            st.dataframe(users_df, use_container_width=True)
+        else:
+            st.info("لا يوجد مستخدمين مسجلين بعد.")
+        
+        # إضافة مستخدم جديد
+        st.subheader("➕ إضافة مستخدم جديد")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_username = st.text_input("اسم المستخدم الجديد:")
+        with col2:
+            new_password = st.text_input("كلمة المرور:", type="password")
+        with col3:
+            user_role = st.selectbox("الدور:", ["user", "admin"])
+        
+        if st.button("إضافة مستخدم", key="add_user"):
+            if not new_username.strip() or not new_password.strip():
+                st.warning("⚠ الرجاء إدخال اسم المستخدم وكلمة المرور.")
+            elif new_username in users:
+                st.warning("⚠ هذا المستخدم موجود بالفعل.")
+            else:
+                users[new_username] = {
+                    "password": new_password,
+                    "role": user_role,
+                    "created_at": datetime.now().isoformat()
+                }
+                if save_users(users):
+                    st.success(f"✅ تم إضافة المستخدم '{new_username}' بنجاح.")
+                    st.rerun()
+                else:
+                    st.error("❌ حدث خطأ أثناء حفظ بيانات المستخدم.")
+        
+        # حذف مستخدم
+        st.subheader("🗑 حذف مستخدم")
+        
+        if len(users) > 1:  # لا يمكن حذف جميع المستخدمين
+            user_to_delete = st.selectbox(
+                "اختر مستخدم للحذف:",
+                [u for u in users.keys() if u != "admin"],  # لا يمكن حذف admin
+                key="delete_user_select"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                confirm_delete = st.checkbox("✅ تأكيد الحذف", key="confirm_user_delete")
+            with col2:
+                if st.button("حذف المستخدم", key="delete_user_btn"):
+                    if not confirm_delete:
+                        st.warning("⚠ يرجى تأكيد الحذف أولاً.")
+                    elif user_to_delete == "admin":
+                        st.error("❌ لا يمكن حذف المستخدم admin.")
+                    elif user_to_delete == st.session_state.get("username"):
+                        st.error("❌ لا يمكن حذف حسابك أثناء تسجيل الدخول.")
+                    else:
+                        if user_to_delete in users:
+                            del users[user_to_delete]
+                            if save_users(users):
+                                st.success(f"✅ تم حذف المستخدم '{user_to_delete}' بنجاح.")
+                                st.rerun()
+                            else:
+                                st.error("❌ حدث خطأ أثناء حفظ التغييرات.")
+        else:
+            st.info("لا يمكن حذف جميع المستخدمين. يجب أن يبقى مستخدم واحد على الأقل.")
+        
+        # إعادة تعيين كلمة المرور
+        st.subheader("🔑 إعادة تعيين كلمة المرور")
+        
+        if len(users) > 0:
+            user_to_reset = st.selectbox(
+                "اختر مستخدم لإعادة تعيين كلمة المرور:",
+                list(users.keys()),
+                key="reset_user_select"
+            )
+            
+            new_password_reset = st.text_input("كلمة المرور الجديدة:", type="password", key="new_password_reset")
+            
+            if st.button("إعادة تعيين كلمة المرور", key="reset_password_btn"):
+                if not new_password_reset.strip():
+                    st.warning("⚠ الرجاء إدخال كلمة المرور الجديدة.")
+                else:
+                    users[user_to_reset]["password"] = new_password_reset
+                    if save_users(users):
+                        st.success(f"✅ تم إعادة تعيين كلمة المرور للمستخدم '{user_to_reset}' بنجاح.")
+                        st.rerun()
+                    else:
+                        st.error("❌ حدث خطأ أثناء حفظ التغييرات.")
+
+# -------------------------------
+# Tab: الدعم الفني - لجميع المستخدمين
+# -------------------------------
+tech_support_tab_index = 1 if not is_admin else 3
+with tabs[tech_support_tab_index]:
+    st.header("📞 الدعم الفني")
+    
+    st.markdown("## 🛠 معلومات التطوير والدعم")
+    st.markdown("*تم تطوير هذا التطبيق بواسطة:*")
+    st.markdown("### *م. محمد عبدالله*")
+    st.markdown("### *رئيس قسم الكرد والمحطات*")
+    st.markdown("### *مصنع بيل يارن للغزل*")
+    st.markdown("---")
+    st.markdown("### *معلومات الاتصال:*")
+    st.markdown("- 📧 البريد الإلكتروني: m.abdallah@bailyarn.com")
+    st.markdown("- 📞 هاتف المصنع: 01000000000")
+    st.markdown("- 🏢 الموقع: مصنع بيل يارن للغزل")
+    st.markdown("---")
+    st.markdown("### *خدمات الدعم الفني:*")
+    st.markdown("- 🔧 صيانة وتحديث النظام")
+    st.markdown("- 📊 تطوير تقارير إضافية")
+    st.markdown("- 🐛 إصلاح الأخطاء والمشكلات")
+    st.markdown("- 💡 استشارات فنية وتقنية")
+    st.markdown("---")
+    st.markdown("### *إصدار التطبيق:*")
+    st.markdown("- الإصدار: 2.0")
+    st.markdown("- آخر تحديث: 2024")
+    st.markdown("- النظام: CMMS - نظام إدارة الصيانة")
+    
+    st.info("*ملاحظة:* في حالة مواجهة أي مشاكل تقنية أو تحتاج إلى إضافة ميزات جديدة، يرجى التواصل مع قسم الدعم الفني.")
