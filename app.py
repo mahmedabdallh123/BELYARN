@@ -448,49 +448,84 @@ def check_machine_status(card_num, current_tons, all_sheets):
             for _, row in matching_rows.iterrows():
                 done_services_set = set()
                 
-                # تحديد الأعمدة التي تحتوي على خدمات منجزة - التصحيح هنا
-                # الأعمدة التي يجب تجاهلها (ليست خدمات)
-                ignore_cols = {
+                # تحديد الأعمدة التي تحتوي على خدمات منجزة - التصحيح النهائي
+                # أولاً: تحديد جميع الأعمدة التي يجب تجاهلها (ليست خدمات)
+                metadata_columns = {
                     "card", "Tones", "Min_Tones", "Max_Tones", "Date", 
                     "Other", "Servised by", "Event", "Correction",
-                    # أسماء بديلة محتملة
-                    "Servised By", "SERVISED BY", "servised by",
+                    # جميع الأشكال المحتملة لهذه الأعمدة
                     "Card", "TONES", "MIN_TONES", "MAX_TONES", "DATE",
-                    "OTHER", "EVENT", "CORRECTION"
+                    "OTHER", "EVENT", "CORRECTION", "SERVISED BY",
+                    "servised by", "Servised By", 
+                    # أسماء بديلة لـ "Servised by"
+                    "Serviced by", "Service by", "Serviced By", "Service By",
+                    "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"
                 }
                 
-                for col in matching_rows.columns:
+                # ثانياً: الحصول على أسماء جميع الأعمدة في الشيت الحالي
+                all_columns = set(card_df.columns)
+                
+                # ثالثاً: تحديد أعمدة الخدمات فقط (عن طريق استبعاد أعمدة البيانات الوصفية)
+                service_columns = all_columns - metadata_columns
+                
+                # رابعاً: تصفية service_columns بناءً على تطبيع الأسماء
+                final_service_columns = set()
+                for col in service_columns:
                     col_normalized = normalize_name(col)
-                    # تجاهل الأعمدة غير المرغوب فيها
-                    if col in ignore_cols or col_normalized in [normalize_name(ic) for ic in ignore_cols]:
-                        continue
-                    
-                    # تجاهل الأعمدة الفارغة أو التي تحتوي على قيم غير صالحة
+                    # تجاهل الأعمدة التي تطبيعها يتطابق مع أعمدة البيانات الوصفية
+                    metadata_normalized = {normalize_name(mc) for mc in metadata_columns}
+                    if col_normalized not in metadata_normalized:
+                        final_service_columns.add(col)
+                
+                # خامساً: الآن نتحقق فقط من أعمدة الخدمات الحقيقية
+                for col in final_service_columns:
                     val = str(row.get(col, "")).strip()
-                    if val and val.lower() not in ["nan", "none", "", "null", "0", "no", "yes"]:
+                    if val and val.lower() not in ["nan", "none", "", "null", "0"]:
                         # تحقق مما إذا كانت القيمة تشير إلى أن الخدمة تمت
-                        if val.lower() not in ["no", "false", "0", "not done", "لم تتم"]:
+                        if val.lower() not in ["no", "false", "not done", "لم تتم", "x", "-"]:
                             done_services_set.add(col)
 
-                # جمع بيانات الحدث - التأكد من أن "Servised by" في مكانه الصحيح
+                # جمع بيانات الحدث
                 current_date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
                 current_tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
                 current_other = str(row.get("Other", "")).strip() if pd.notna(row.get("Other")) else "-"
                 
-                # البحث عن عمود "Servised by" بأي شكل من الأشكال
+                # البحث عن عمود "Servised by" - نهائي
                 servised_by_value = "-"
-                for col in matching_rows.columns:
-                    col_normalized = normalize_name(col)
-                    if col_normalized in ["servised by", "serviced by", "service by", "خدم بواسطة"]:
-                        servised_by_value = str(row.get(col, "")).strip() if pd.notna(row.get(col)) else "-"
-                        break
+                servised_by_columns = [
+                    "Servised by", "SERVISED BY", "servised by", "Servised By",
+                    "Serviced by", "Service by", "Serviced By", "Service By",
+                    "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"
+                ]
                 
+                for potential_col in servised_by_columns:
+                    if potential_col in card_df.columns:
+                        value = row.get(potential_col)
+                        if pd.notna(value) and str(value).strip() != "":
+                            servised_by_value = str(value).strip()
+                            break
+                
+                # إذا لم نجد العمود بالأسماء الشائعة، نبحث في جميع الأعمدة
+                if servised_by_value == "-":
+                    for col in card_df.columns:
+                        col_normalized = normalize_name(col)
+                        if col_normalized in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]:
+                            value = row.get(col)
+                            if pd.notna(value) and str(value).strip() != "":
+                                servised_by_value = str(value).strip()
+                                break
+
                 current_event = str(row.get("Event", "")).strip() if pd.notna(row.get("Event")) else "-"
                 current_correction = str(row.get("Correction", "")).strip() if pd.notna(row.get("Correction")) else "-"
 
                 done_services = sorted(list(done_services_set))
                 done_norm = [normalize_name(c) for c in done_services]
-                not_done = [orig for orig, n in zip(needed_parts, needed_norm) if n not in done_norm]
+                
+                # مقارنة الخدمات المنجزة مع المطلوبة
+                not_done = []
+                for needed_part, needed_norm_part in zip(needed_parts, needed_norm):
+                    if needed_norm_part not in done_norm:
+                        not_done.append(needed_part)
 
                 all_results.append({
                     "Card Number": card_num,
@@ -502,7 +537,7 @@ def check_machine_status(card_num, current_tons, all_sheets):
                     "Tones": current_tones,
                     "Event": current_event,
                     "Correction": current_correction,
-                    "Servised by": servised_by_value,  # استخدام القيمة الصحيحة
+                    "Servised by": servised_by_value,
                     "Date": current_date
                 })
         else:
