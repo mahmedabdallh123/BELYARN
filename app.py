@@ -361,7 +361,7 @@ def highlight_cell(val, col_name):
         "Service Done": "background-color: #d4edda; color:#155724; font-weight:bold;",
         "Service Didn't Done": "background-color: #f8d7da; color:#721c24; font-weight:bold;",
         "Date": "background-color: #e7f1ff; color:#004085; font-weight:bold;",
-        "Tones": "background-color: #e8f8f5; color:#0d5c4a; font-weight:bold;",
+        "Tones": "background-color: #e8f8f5; color:#0d5c4a; font-weight:bold;",  # لون جديد لعمود Tones
         "Min_Tons": "background-color: #ebf5fb; color:#154360; font-weight:bold;",
         "Max_Tons": "background-color: #f9ebea; color:#641e16; font-weight:bold;",
         "Event": "background-color: #e2f0d9; color:#2e6f32; font-weight:bold;",
@@ -375,24 +375,17 @@ def style_table(row):
     return [highlight_cell(row[col], col) for col in row.index]
 
 # -------------------------------
-# 🖥 دالة فحص الماكينة - معدلة لعرض جميع الأحداث
+# 🖥 دالة فحص الماكينة - معدلة لإضافة عمود Tones
 # -------------------------------
 def check_machine_status(card_num, current_tons, all_sheets):
-    if not all_sheets:
-        st.error("❌ لم يتم تحميل أي شيتات.")
-        return
-    
-    if "ServicePlan" not in all_sheets:
+    if not all_sheets or "ServicePlan" not in all_sheets:
         st.error("❌ الملف لا يحتوي على شيت ServicePlan.")
         return
-    
     service_plan_df = all_sheets["ServicePlan"]
     card_sheet_name = f"Card{card_num}"
-    
     if card_sheet_name not in all_sheets:
         st.warning(f"⚠ لا يوجد شيت باسم {card_sheet_name}")
         return
-    
     card_df = all_sheets[card_sheet_name]
 
     # نطاق العرض
@@ -443,63 +436,86 @@ def check_machine_status(card_num, current_tons, all_sheets):
         mask = (card_df.get("Min_Tones", 0).fillna(0) <= slice_max) & (card_df.get("Max_Tones", 0).fillna(0) >= slice_min)
         matching_rows = card_df[mask]
 
+        done_services_set = set()
+        last_date = "-"
+        last_tones = "-"  # تغيير الاسم من last_tons إلى last_tones لتجنب الالتباس
+        last_other = "-"
+        last_servised_by = "-"
+        last_event = "-"
+        last_correction = "-"
+
         if not matching_rows.empty:
-            # نمر على كل صف (حدث) في الصفوف المطابقة
-            for _, row in matching_rows.iterrows():
-                done_services_set = set()
-                
-                # تحديد الأعمدة التي تحتوي على خدمات منجزة
-                ignore_cols = {"card", "Tones", "Min_Tones", "Max_Tones", "Date", "Other", "Servised by", "Event", "Correction"}
+            ignore_cols = {"card", "Tones", "Min_Tones", "Max_Tones", "Date", "Other", "Servised by", "Event", "Correction"}
+            for _, r in matching_rows.iterrows():
                 for col in matching_rows.columns:
                     if col not in ignore_cols:
-                        val = str(row.get(col, "")).strip()
+                        val = str(r.get(col, "")).strip()
                         if val and val.lower() not in ["nan", "none", ""]:
                             done_services_set.add(col)
+            # قراءة آخر تاريخ
+            if "Date" in matching_rows.columns:
+                try:
+                    cleaned_dates = matching_rows["Date"].astype(str).str.replace("\\", "/", regex=False)
+                    dates = pd.to_datetime(cleaned_dates, errors="coerce", dayfirst=True)
+                    if dates.notna().any():
+                        idx = dates.idxmax()
+                        last_date = dates.loc[idx].strftime("%d/%m/%Y")
+                except Exception:
+                    last_date = "-"
+            # آخر طن - نأخذ قيمة Tones من الصف الذي يحتوي على آخر تاريخ
+            if "Tones" in matching_rows.columns:
+                try:
+                    # نربط بين التاريخ و Tones لأخذ قيمة Tones المناسبة
+                    if "Date" in matching_rows.columns:
+                        # نبحث عن الصف بأحدث تاريخ ونأخذ قيمة Tones منه
+                        cleaned_dates = matching_rows["Date"].astype(str).str.replace("\\", "/", regex=False)
+                        dates = pd.to_datetime(cleaned_dates, errors="coerce", dayfirst=True)
+                        if dates.notna().any():
+                            idx = dates.idxmax()
+                            last_tones = matching_rows["Tones"].iloc[idx]
+                            if pd.notna(last_tones):
+                                last_tones = str(last_tones).strip()
+                    else:
+                        # إذا لم يوجد عمود تاريخ، نأخذ آخر قيمة Tones
+                        tones_vals = matching_rows["Tones"].dropna()
+                        if not tones_vals.empty:
+                            last_tones = str(tones_vals.iloc[-1]).strip()
+                except Exception:
+                    last_tones = "-"
+            # Other
+            if "Other" in matching_rows.columns:
+                last_other = str(matching_rows["Other"].dropna().iloc[-1]) if matching_rows["Other"].notna().any() else "-"
+            # Servised by
+            if "Servised by" in matching_rows.columns:
+                last_servised_by = str(matching_rows["Servised by"].dropna().iloc[-1]) if matching_rows["Servised by"].notna().any() else "-"
+            # Event
+            if "Event" in matching_rows.columns:
+                last_event = str(matching_rows["Event"].dropna().iloc[-1]) if matching_rows["Event"].notna().any() else "-"
+            # Correction
+            if "Correction" in matching_rows.columns:
+                last_correction = str(matching_rows["Correction"].dropna().iloc[-1]) if matching_rows["Correction"].notna().any() else "-"
 
-                # جمع بيانات الحدث
-                current_date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
-                current_tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
-                current_other = str(row.get("Other", "")).strip() if pd.notna(row.get("Other")) else "-"
-                current_servised_by = str(row.get("Servised by", "")).strip() if pd.notna(row.get("Servised by")) else "-"
-                current_event = str(row.get("Event", "")).strip() if pd.notna(row.get("Event")) else "-"
-                current_correction = str(row.get("Correction", "")).strip() if pd.notna(row.get("Correction")) else "-"
+        done_services = sorted(list(done_services_set))
+        done_norm = [normalize_name(c) for c in done_services]
+        not_done = [orig for orig, n in zip(needed_parts, needed_norm) if n not in done_norm]
 
-                done_services = sorted(list(done_services_set))
-                done_norm = [normalize_name(c) for c in done_services]
-                not_done = [orig for orig, n in zip(needed_parts, needed_norm) if n not in done_norm]
-
-                all_results.append({
-                    "Card Number": card_num,
-                    "Min_Tons": slice_min,
-                    "Max_Tons": slice_max,
-                    "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
-                    "Service Done": ", ".join(done_services) if done_services else "-",
-                    "Service Didn't Done": ", ".join(not_done) if not_done else "-",
-                    "Tones": current_tones,
-                    "Event": current_event,
-                    "Correction": current_correction,
-                    "Servised by": current_servised_by,
-                    "Date": current_date
-                })
-        else:
-            # إذا لم توجد أحداث، نضيف سجل للشريحة بدون خدمات منجزة
-            all_results.append({
-                "Card Number": card_num,
-                "Min_Tons": slice_min,
-                "Max_Tons": slice_max,
-                "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
-                "Service Done": "-",
-                "Service Didn't Done": ", ".join(needed_parts) if needed_parts else "-",
-                "Tones": "-",
-                "Event": "-",
-                "Correction": "-",
-                "Servised by": "-",
-                "Date": "-"
-            })
+        all_results.append({
+            "Card Number": card_num,
+            "Min_Tons": slice_min,
+            "Max_Tons": slice_max,
+            "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
+            "Service Done": ", ".join(done_services) if done_services else "-",
+            "Service Didn't Done": ", ".join(not_done) if not_done else "-",
+            "Tones": last_tones,  # العمود الجديد
+            "Event": last_event,
+            "Correction": last_correction,
+            "Servised by": last_servised_by,
+            "Date": last_date
+        })
 
     result_df = pd.DataFrame(all_results).dropna(how="all").reset_index(drop=True)
 
-    st.markdown("### 📋 نتائج الفحص - جميع الأحداث")
+    st.markdown("### 📋 نتائج الفحص")
     st.dataframe(result_df.style.apply(style_table, axis=1), use_container_width=True)
 
     # تنزيل النتائج
