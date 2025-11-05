@@ -17,19 +17,38 @@ except Exception:
     GITHUB_AVAILABLE = False
 
 # ===============================
-# إعدادات عامة
+# ⚙ إعدادات التطبيق - يمكن تعديلها بسهولة
+# ===============================
+APP_CONFIG = {
+    # إعدادات التطبيق العامة
+    "APP_TITLE": "CMMS - Bail Yarn",
+    "APP_ICON": "🏭",
+    
+    # إعدادات GitHub
+    "REPO_NAME": "mahmedabdallh123/BELYARN",  # غيّر هذا لريبو الجديد
+    "BRANCH": "main",
+    "FILE_PATH": "Machine_Service_Lookup.xlsx",  # غيّر هذا لملف Excel الجديد
+    "LOCAL_FILE": "Machine_Service_Lookup.xlsx",  # غيّر هذا للملف المحلي الجديد
+    
+    # إعدادات الأمان
+    "MAX_ACTIVE_USERS": 2,
+    "SESSION_DURATION_MINUTES": 15,
+    
+    # إعدادات الواجهة
+    "SHOW_TECH_SUPPORT_TO_ALL": False,  # True = الكل يشوف الدعم الفني, False = فقط admin
+    "CUSTOM_TABS": ["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"]
+}
+
+# ===============================
+# 🗂 إعدادات الملفات (لا تحتاج للتعديل)
 # ===============================
 USERS_FILE = "users.json"
 STATE_FILE = "state.json"
-SESSION_DURATION = timedelta(minutes=15)  # مدة الجلسة 10 دقائق
-MAX_ACTIVE_USERS = 2  # أقصى عدد مستخدمين مسموح
+SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
+MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 
-# إعدادات GitHub (مسارات الملف والريبو)
-REPO_NAME = "mahmedabdallh123/BELYARN"  # عدل إذا لزم
-BRANCH = "main"
-FILE_PATH = "Machine_Service_Lookup.xlsx"
-LOCAL_FILE = "Machine_Service_Lookup.xlsx"
-GITHUB_EXCEL_URL = "https://github.com/mahmedabdallh123/BELYARN/raw/refs/heads/main/Machine_Service_Lookup.xlsx"
+# إنشاء رابط GitHub تلقائياً من الإعدادات
+GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
 # -------------------------------
 # 🧩 دوال مساعدة للملفات والحالة
@@ -124,7 +143,7 @@ def logout_action():
     st.rerun()
 
 # -------------------------------
-# 🧠 واجهة تسجيل الدخول (مأخوذ وموسع)
+# 🧠 واجهة تسجيل الدخول
 # -------------------------------
 def login_ui():
     users = load_users()
@@ -133,7 +152,7 @@ def login_ui():
         st.session_state.logged_in = False
         st.session_state.username = None
 
-    st.title("🔐 تسجيل الدخول - Bail Yarn (CMMS)")
+    st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
 
     # اختيار المستخدم
     username_input = st.selectbox("👤 اختر المستخدم", list(users.keys()))
@@ -185,7 +204,7 @@ def fetch_from_github_requests():
     try:
         response = requests.get(GITHUB_EXCEL_URL, stream=True, timeout=15)
         response.raise_for_status()
-        with open(LOCAL_FILE, "wb") as f:
+        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
             shutil.copyfileobj(response.raw, f)
         # امسح الكاش
         try:
@@ -208,10 +227,10 @@ def fetch_from_github_api():
             return fetch_from_github_requests()
         
         g = Github(token)
-        repo = g.get_repo(REPO_NAME)
-        file_content = repo.get_contents(FILE_PATH, ref=BRANCH)
+        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+        file_content = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
         content = b64decode(file_content.content)
-        with open(LOCAL_FILE, "wb") as f:
+        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
             f.write(content)
         try:
             st.cache_data.clear()
@@ -228,12 +247,12 @@ def fetch_from_github_api():
 @st.cache_data(show_spinner=False)
 def load_all_sheets():
     """تحميل جميع الشيتات من ملف Excel"""
-    if not os.path.exists(LOCAL_FILE):
+    if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
         return None
     
     try:
         # قراءة جميع الشيتات
-        sheets = pd.read_excel(LOCAL_FILE, sheet_name=None)
+        sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None)
         
         if not sheets:
             return None
@@ -250,12 +269,12 @@ def load_all_sheets():
 @st.cache_data(show_spinner=False)
 def load_sheets_for_edit():
     """تحميل جميع الشيتات للتحرير"""
-    if not os.path.exists(LOCAL_FILE):
+    if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
         return None
     
     try:
         # قراءة جميع الشيتات مع dtype=object للحفاظ على تنسيق البيانات
-        sheets = pd.read_excel(LOCAL_FILE, sheet_name=None, dtype=object)
+        sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None, dtype=object)
         
         if not sheets:
             return None
@@ -275,7 +294,7 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     """دالة محسنة للحفظ التلقائي المحلي والرفع إلى GitHub"""
     # احفظ محلياً
     try:
-        with pd.ExcelWriter(LOCAL_FILE, engine="openpyxl") as writer:
+        with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
                 try:
                     sh.to_excel(writer, sheet_name=name, index=False)
@@ -303,19 +322,19 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
 
     try:
         g = Github(token)
-        repo = g.get_repo(REPO_NAME)
-        with open(LOCAL_FILE, "rb") as f:
+        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+        with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
             content = f.read()
 
         try:
-            contents = repo.get_contents(FILE_PATH, ref=BRANCH)
-            result = repo.update_file(path=FILE_PATH, message=commit_message, content=content, sha=contents.sha, branch=BRANCH)
+            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+            result = repo.update_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, sha=contents.sha, branch=APP_CONFIG["BRANCH"])
             st.success(f"✅ تم الحفظ والرفع إلى GitHub بنجاح: {commit_message}")
             return load_sheets_for_edit()
         except Exception as e:
             # حاول رفع كملف جديد أو إنشاء
             try:
-                result = repo.create_file(path=FILE_PATH, message=commit_message, content=content, branch=BRANCH)
+                result = repo.create_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, branch=APP_CONFIG["BRANCH"])
                 st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
                 return load_sheets_for_edit()
             except Exception as create_error:
@@ -361,7 +380,7 @@ def highlight_cell(val, col_name):
         "Service Done": "background-color: #d4edda; color:#155724; font-weight:bold;",
         "Service Didn't Done": "background-color: #f8d7da; color:#721c24; font-weight:bold;",
         "Date": "background-color: #e7f1ff; color:#004085; font-weight:bold;",
-        "Tones": "background-color: #e8f8f5; color:#0d5c4a; font-weight:bold;",  # لون جديد لعمود Tones
+        "Tones": "background-color: #e8f8f5; color:#0d5c4a; font-weight:bold;",
         "Min_Tons": "background-color: #ebf5fb; color:#154360; font-weight:bold;",
         "Max_Tons": "background-color: #f9ebea; color:#641e16; font-weight:bold;",
         "Event": "background-color: #e2f0d9; color:#2e6f32; font-weight:bold;",
@@ -375,7 +394,7 @@ def style_table(row):
     return [highlight_cell(row[col], col) for col in row.index]
 
 # -------------------------------
-# 🖥 دالة فحص الماكينة - معدلة لإضافة عمود Tones
+# 🖥 دالة فحص الماكينة
 # -------------------------------
 def check_machine_status(card_num, current_tons, all_sheets):
     if not all_sheets:
@@ -444,44 +463,33 @@ def check_machine_status(card_num, current_tons, all_sheets):
         matching_rows = card_df[mask]
 
         if not matching_rows.empty:
-            # نمر على كل صف (حدث) في الصفوف المطابقة
             for _, row in matching_rows.iterrows():
                 done_services_set = set()
                 
-                # تحديد الأعمدة التي تحتوي على خدمات منجزة - التصحيح النهائي
-                # أولاً: تحديد جميع الأعمدة التي يجب تجاهلها (ليست خدمات)
+                # تحديد الأعمدة التي تحتوي على خدمات منجزة
                 metadata_columns = {
                     "card", "Tones", "Min_Tones", "Max_Tones", "Date", 
                     "Other", "Servised by", "Event", "Correction",
-                    # جميع الأشكال المحتملة لهذه الأعمدة
                     "Card", "TONES", "MIN_TONES", "MAX_TONES", "DATE",
                     "OTHER", "EVENT", "CORRECTION", "SERVISED BY",
                     "servised by", "Servised By", 
-                    # أسماء بديلة لـ "Servised by"
                     "Serviced by", "Service by", "Serviced By", "Service By",
                     "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"
                 }
                 
-                # ثانياً: الحصول على أسماء جميع الأعمدة في الشيت الحالي
                 all_columns = set(card_df.columns)
-                
-                # ثالثاً: تحديد أعمدة الخدمات فقط (عن طريق استبعاد أعمدة البيانات الوصفية)
                 service_columns = all_columns - metadata_columns
                 
-                # رابعاً: تصفية service_columns بناءً على تطبيع الأسماء
                 final_service_columns = set()
                 for col in service_columns:
                     col_normalized = normalize_name(col)
-                    # تجاهل الأعمدة التي تطبيعها يتطابق مع أعمدة البيانات الوصفية
                     metadata_normalized = {normalize_name(mc) for mc in metadata_columns}
                     if col_normalized not in metadata_normalized:
                         final_service_columns.add(col)
                 
-                # خامساً: الآن نتحقق فقط من أعمدة الخدمات الحقيقية
                 for col in final_service_columns:
                     val = str(row.get(col, "")).strip()
                     if val and val.lower() not in ["nan", "none", "", "null", "0"]:
-                        # تحقق مما إذا كانت القيمة تشير إلى أن الخدمة تمت
                         if val.lower() not in ["no", "false", "not done", "لم تتم", "x", "-"]:
                             done_services_set.add(col)
 
@@ -490,7 +498,7 @@ def check_machine_status(card_num, current_tons, all_sheets):
                 current_tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
                 current_other = str(row.get("Other", "")).strip() if pd.notna(row.get("Other")) else "-"
                 
-                # البحث عن عمود "Servised by" - نهائي
+                # البحث عن عمود "Servised by"
                 servised_by_value = "-"
                 servised_by_columns = [
                     "Servised by", "SERVISED BY", "servised by", "Servised By",
@@ -505,7 +513,6 @@ def check_machine_status(card_num, current_tons, all_sheets):
                             servised_by_value = str(value).strip()
                             break
                 
-                # إذا لم نجد العمود بالأسماء الشائعة، نبحث في جميع الأعمدة
                 if servised_by_value == "-":
                     for col in card_df.columns:
                         col_normalized = normalize_name(col)
@@ -570,11 +577,12 @@ def check_machine_status(card_num, current_tons, all_sheets):
         file_name=f"Service_Report_Card{card_num}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 # -------------------------------
 # 🖥 الواجهة الرئيسية المدمجة
 # -------------------------------
 # إعداد الصفحة
-st.set_page_config(page_title="CMMS - Bail Yarn", layout="wide")
+st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
 # شريط تسجيل الدخول / معلومات الجلسة في الشريط الجانبي
 with st.sidebar:
@@ -618,17 +626,21 @@ all_sheets = load_all_sheets()
 sheets_edit = load_sheets_for_edit()
 
 # واجهة التبويبات الرئيسية
-st.title("🏭 CMMS - Bail Yarn")
+st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
 
 # التحقق من الصلاحيات لعرض التبويبات المناسبة
 username = st.session_state.get("username")
 is_admin = username == "admin"
 
-# تحديد التبويبات بناءً على نوع المستخدم
+# تحديد التبويبات بناءً على نوع المستخدم والإعدادات
 if is_admin:
-    tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"])
+    tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
 else:
-    tabs = st.tabs(["📊 عرض وفحص الماكينات", "📞 الدعم الفني"])
+    # للمستخدمين العاديين: نعرض تبويب العرض فقط، وإضافة الدعم الفني إذا كان مسموحاً
+    regular_tabs = ["📊 عرض وفحص الماكينات"]
+    if APP_CONFIG["SHOW_TECH_SUPPORT_TO_ALL"]:
+        regular_tabs.append("📞 الدعم الفني")
+    tabs = st.tabs(regular_tabs)
 
 # -------------------------------
 # Tab: عرض وفحص الماكينات
@@ -980,4 +992,3 @@ if is_admin and len(tabs) > 2:
                         st.rerun()
                     else:
                         st.error("❌ حدث خطأ أثناء حفظ التغييرات.")
-
