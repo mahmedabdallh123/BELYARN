@@ -21,7 +21,7 @@ except Exception:
 # ===============================
 APP_CONFIG = {
     # إعدادات التطبيق العامة
-    "APP_TITLE": "سيرفيس تحضيرات بيل يارن ",
+    "APP_TITLE": "سيرفيس تحضيرات بيل يارن",
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
@@ -36,7 +36,7 @@ APP_CONFIG = {
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": False,
-    "CUSTOM_TABS": ["📊 فحص السيرفيس", "📋 فحص الاحداث", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"]
+    "CUSTOM_TABS": ["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"]
 }
 
 # ===============================
@@ -206,8 +206,16 @@ def login_ui():
 
     st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
 
+    # تحميل قائمة المستخدمين مباشرة من الملف
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            current_users = json.load(f)
+        user_list = list(current_users.keys())
+    except:
+        user_list = list(users.keys())
+
     # اختيار المستخدم
-    username_input = st.selectbox("👤 اختر المستخدم", list(users.keys()))
+    username_input = st.selectbox("👤 اختر المستخدم", user_list)
     password = st.text_input("🔑 كلمة المرور", type="password")
 
     active_users = [u for u, v in state.items() if v.get("active")]
@@ -216,7 +224,10 @@ def login_ui():
 
     if not st.session_state.logged_in:
         if st.button("تسجيل الدخول"):
-            if username_input in users and users[username_input]["password"] == password:
+            # تحميل المستخدمين من جديد للتأكد من أحدث بيانات
+            current_users = load_users()
+            
+            if username_input in current_users and current_users[username_input]["password"] == password:
                 if username_input == "admin":
                     pass
                 elif username_input in active_users:
@@ -225,12 +236,15 @@ def login_ui():
                 elif active_count >= MAX_ACTIVE_USERS:
                     st.error("🚫 الحد الأقصى للمستخدمين المتصلين حالياً.")
                     return False
+                
                 state[username_input] = {"active": True, "login_time": datetime.now().isoformat()}
                 save_state(state)
+                
                 st.session_state.logged_in = True
                 st.session_state.username = username_input
-                st.session_state.user_role = users[username_input].get("role", "viewer")
-                st.session_state.user_permissions = users[username_input].get("permissions", ["view"])
+                st.session_state.user_role = current_users[username_input].get("role", "viewer")
+                st.session_state.user_permissions = current_users[username_input].get("permissions", ["view"])
+                
                 st.success(f"✅ تم تسجيل الدخول: {username_input} ({st.session_state.user_role})")
                 st.rerun()
             else:
@@ -448,34 +462,32 @@ def style_table(row):
 
 def get_user_permissions(user_role, user_permissions):
     """الحصول على صلاحيات المستخدم بناءً على الدور والصلاحيات"""
-    if "all" in user_permissions:
+    # إذا كان الدور admin، يعطى جميع الصلاحيات
+    if user_role == "admin":
         return {
             "can_view": True,
             "can_edit": True,
             "can_manage_users": True,
             "can_see_tech_support": True
         }
-    elif "edit" in user_permissions:
+    
+    # إذا كان الدور editor
+    elif user_role == "editor":
         return {
             "can_view": True,
             "can_edit": True,
             "can_manage_users": False,
             "can_see_tech_support": False
         }
-    elif "view" in user_permissions:
-        return {
-            "can_view": True,
-            "can_edit": False,
-            "can_manage_users": False,
-            "can_see_tech_support": False
-        }
+    
+    # إذا كان الدور viewer أو أي دور آخر
     else:
-        # صلاحيات افتراضية للعرض فقط
+        # التحقق من الصلاحيات الفردية
         return {
-            "can_view": True,
-            "can_edit": False,
-            "can_manage_users": False,
-            "can_see_tech_support": False
+            "can_view": "view" in user_permissions or "edit" in user_permissions or "all" in user_permissions,
+            "can_edit": "edit" in user_permissions or "all" in user_permissions,
+            "can_manage_users": "manage_users" in user_permissions or "all" in user_permissions,
+            "can_see_tech_support": "tech_support" in user_permissions or "all" in user_permissions
         }
 
 def get_servised_by_value(row):
@@ -1880,7 +1892,7 @@ def manage_users():
             # اختيار الصلاحيات بناءً على الدور
             if user_role == "admin":
                 default_permissions = ["all"]
-                available_permissions = ["all", "view", "edit", "manage_users"]
+                available_permissions = ["all", "view", "edit", "manage_users", "tech_support"]
             elif user_role == "editor":
                 default_permissions = ["view", "edit"]
                 available_permissions = ["view", "edit", "export"]
@@ -1964,16 +1976,16 @@ def manage_users():
                         key="edit_user_role"
                     )
                     
-                    # تغيير الصلاحيات
+                    # تغيير الصلاحيات بناءً على الدور الجديد
                     if new_role == "admin":
-                        available_permissions = ["all", "view", "edit", "manage_users"]
                         default_permissions = ["all"]
+                        available_permissions = ["all", "view", "edit", "manage_users", "tech_support"]
                     elif new_role == "editor":
-                        available_permissions = ["view", "edit", "export"]
                         default_permissions = ["view", "edit"]
+                        available_permissions = ["view", "edit", "export"]
                     else:
-                        available_permissions = ["view", "export"]
                         default_permissions = ["view"]
+                        available_permissions = ["view", "export"]
                     
                     current_permissions = user_info.get("permissions", default_permissions)
                     new_permissions = st.multiselect(
@@ -2010,6 +2022,13 @@ def manage_users():
                         if updated:
                             if save_users(users):
                                 st.success(f"✅ تم تحديث المستخدم '{user_to_edit}' بنجاح!")
+                                
+                                # إذا كان المستخدم الحالي هو الذي تم تعديله، قم بتحديث session state
+                                if st.session_state.get("username") == user_to_edit:
+                                    st.session_state.user_role = new_role
+                                    st.session_state.user_permissions = new_permissions if new_permissions else default_permissions
+                                    st.info("🔁 تم تحديث بيانات جلسة العمل الحالية.")
+                                
                                 st.rerun()
                             else:
                                 st.error("❌ حدث خطأ أثناء حفظ التعديلات.")
@@ -2195,6 +2214,19 @@ with st.sidebar:
             st.rerun()
         except Exception as e:
             st.error(f"❌ خطأ في مسح الكاش: {e}")
+    
+    # زر تحديث الجلسة
+    if st.button("🔄 تحديث الجلسة", key="refresh_session"):
+        # تحميل أحدث بيانات المستخدم
+        users = load_users()
+        username = st.session_state.get("username")
+        if username and username in users:
+            st.session_state.user_role = users[username].get("role", "viewer")
+            st.session_state.user_permissions = users[username].get("permissions", ["view"])
+            st.success("✅ تم تحديث بيانات الجلسة!")
+            st.rerun()
+        else:
+            st.warning("⚠ لا يمكن تحديث الجلسة.")
     
     st.markdown("---")
     # زر لإعادة تسجيل الخروج
