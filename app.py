@@ -32,7 +32,7 @@ APP_CONFIG = {
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 2,
-    "SESSION_DURATION_MINUTES": 15,
+    "SESSION_DURATION_MINUTES": 900,
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": False,
