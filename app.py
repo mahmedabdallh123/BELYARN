@@ -21,18 +21,18 @@ except Exception:
 # ===============================
 APP_CONFIG = {
     # إعدادات التطبيق العامة
-    "APP_TITLE": "سيرفيس تحضيرات بيل يارن",
+    "APP_TITLE": "سيرفيس تحضيرات بيل يارن 1",
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/BELYARN",
+    "REPO_NAME": "mahmedabdallh123/Elqds",
     "BRANCH": "main",
-    "FILE_PATH": "Machine_Service_Lookup.xlsx",
-    "LOCAL_FILE": "Machine_Service_Lookup.xlsx",
+    "FILE_PATH": "l4.xlsx",
+    "LOCAL_FILE": "l4.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 2,
-    "SESSION_DURATION_MINUTES": 900,
+    "SESSION_DURATION_MINUTES": 15,
     
     # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": False,
@@ -1077,21 +1077,6 @@ def check_events_and_corrections(all_sheets):
                     key="input_date",
                     placeholder="اتركه فارغاً للبحث في كل التواريخ"
                 )
-                
-                # شهور السنة
-                months = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", 
-                         "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
-                
-                month_cols = st.columns(4)
-                for i, month in enumerate(months):
-                    with month_cols[i % 4]:
-                        if st.button(f"{i+1}. {month}", key=f"month_{i+1}"):
-                            current_date = st.session_state.search_params.get("date_range", "")
-                            if current_date:
-                                st.session_state.search_params["date_range"] = f"{current_date},{i+1}/"
-                            else:
-                                st.session_state.search_params["date_range"] = f"{i+1}/"
-                            st.rerun()
         
         with col2:
             # قسم فنيي الخدمة
@@ -1103,31 +1088,6 @@ def check_events_and_corrections(all_sheets):
                     key="input_techs",
                     placeholder="اتركه فارغاً للبحث في كل الفنيين"
                 )
-                
-                # استخراج أسماء الفنيين المتاحة
-                available_techs = extract_available_techs(all_sheets)
-                if available_techs:
-                    st.caption(f"📋 فنيون متاحون ({len(available_techs)}):")
-                    
-                    # الحصول على الفنيين المحددين حالياً بشكل آمن
-                    current_techs_input = st.session_state.search_params.get("tech_names", "")
-                    current_techs = []
-                    if current_techs_input:
-                        # تنظيف القائمة من القيم الفارغة
-                        current_techs = [t.strip() for t in current_techs_input.split(',') 
-                                        if t.strip() and t.strip() in available_techs]
-                    
-                    # استخدام multiselect بدون default أولاً
-                    selected_techs = st.multiselect(
-                        "اختر فنيين:",
-                        options=available_techs,
-                        key="select_techs",
-                        label_visibility="collapsed"
-                    )
-                    
-                    # تحديث الحقل النصي بناءً على الاختيار
-                    if selected_techs:
-                        tech_names = ", ".join(selected_techs)
             
             # قسم نص البحث
             with st.expander("📝 **نص البحث**", expanded=True):
@@ -1138,19 +1098,6 @@ def check_events_and_corrections(all_sheets):
                     key="input_text",
                     placeholder="اتركه فارغاً للبحث في كل النصوص"
                 )
-                
-                # كلمات شائعة
-                common_words = ["صيانة", "إصلاح", "تغيير", "تنظيف", "فحص", "تركيب", "تبديل"]
-                word_cols = st.columns(4)
-                for i, word in enumerate(common_words):
-                    with word_cols[i % 4]:
-                        if st.button(word, key=f"word_{word}"):
-                            current_text = st.session_state.search_params.get("search_text", "")
-                            if current_text:
-                                st.session_state.search_params["search_text"] = f"{current_text},{word}"
-                            else:
-                                st.session_state.search_params["search_text"] = word
-                            st.rerun()
         
         # قسم خيارات البحث المتقدمة
         with st.expander("⚙ **خيارات متقدمة**", expanded=False):
@@ -1233,12 +1180,6 @@ def check_events_and_corrections(all_sheets):
     st.session_state.search_params["exact_match"] = (search_mode == "مطابقة كاملة")
     st.session_state.search_params["include_empty"] = include_empty
     st.session_state.search_params["sort_by"] = sort_by
-    
-    # تحديث tech_names من multiselect إذا تم الاختيار
-    if "select_techs" in st.session_state and st.session_state.select_techs:
-        selected_techs_list = st.session_state.select_techs
-        if selected_techs_list:
-            st.session_state.search_params["tech_names"] = ", ".join(selected_techs_list)
     
     # معالجة البحث
     if search_clicked or st.session_state.search_triggered:
@@ -1518,17 +1459,42 @@ def parse_card_numbers(card_numbers_str):
     return numbers
 
 def display_search_results(results, search_params):
-    """عرض نتائج البحث بشكل احترافي"""
+    """عرض نتائج البحث بشكل احترافي مع ترتيب متسلسل"""
     # تحويل النتائج إلى DataFrame
+    if not results:
+        st.warning("⚠ لا توجد نتائج لعرضها")
+        return
+    
     result_df = pd.DataFrame(results)
     
-    # ترتيب النتائج
+    # التأكد من وجود البيانات
+    if result_df.empty:
+        st.warning("⚠ لا توجد بيانات لعرضها")
+        return
+    
+    # إنشاء نسخة للعرض مع معالجة الترتيب
+    display_df = result_df.copy()
+    
+    # تحويل رقم الماكينة إلى رقم صحيح للترتيب (بشكل آمن)
+    display_df['Card_Number_Clean'] = pd.to_numeric(display_df['Card Number'], errors='coerce')
+    
+    # تحويل التواريخ لترتيب زمني (بشكل آمن)
+    display_df['Date_Clean'] = pd.to_datetime(display_df['Date'], errors='coerce', dayfirst=True)
+    
+    # ترتيب النتائج حسب رقم الماكينة ثم التاريخ
     if search_params["sort_by"] == "التاريخ":
-        result_df = result_df.sort_values(by="Date", ascending=False)
+        display_df = display_df.sort_values(by=['Date_Clean', 'Card_Number_Clean'], 
+                                          ascending=[False, True], na_position='last')
     elif search_params["sort_by"] == "فني الخدمة":
-        result_df = result_df.sort_values(by="Servised by")
-    else:  # رقم الماكينة
-        result_df = result_df.sort_values(by="Card Number")
+        display_df = display_df.sort_values(by=['Servised by', 'Card_Number_Clean', 'Date_Clean'], 
+                                          ascending=[True, True, False], na_position='last')
+    else:  # رقم الماكينة (الافتراضي)
+        display_df = display_df.sort_values(by=['Card_Number_Clean', 'Date_Clean'], 
+                                          ascending=[True, False], na_position='last')
+    
+    # إضافة ترتيب الأحداث لكل ماكينة
+    display_df['Event_Order'] = display_df.groupby('Card Number').cumcount() + 1
+    display_df['Total_Events'] = display_df.groupby('Card Number')['Card Number'].transform('count')
     
     # عرض الإحصائيات
     st.markdown("### 📈 إحصائيات النتائج")
@@ -1536,65 +1502,30 @@ def display_search_results(results, search_params):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("📋 عدد النتائج", len(result_df))
+        st.metric("📋 عدد النتائج", len(display_df))
     
     with col2:
-        unique_machines = result_df["Card Number"].nunique()
+        unique_machines = display_df["Card Number"].nunique()
         st.metric("🔢 عدد الماكينات", unique_machines)
     
     with col3:
-        if "Servised by" in result_df.columns:
-            unique_techs = result_df[result_df["Servised by"] != "-"]["Servised by"].nunique()
-            st.metric("👨‍🔧 فنيين مختلفين", unique_techs)
+        # عدد الماكينات التي لديها أكثر من حدث
+        if not display_df.empty:
+            machine_counts = display_df.groupby('Card Number').size()
+            multi_event_machines = (machine_counts > 1).sum()
+            st.metric("🔢 مكن متعددة الأحداث", multi_event_machines)
+        else:
+            st.metric("🔢 مكن متعددة الأحداث", 0)
     
     with col4:
-        with_correction = result_df[result_df["Correction"] != "-"].shape[0]
-        st.metric("✏ تحتوي على تصحيح", with_correction)
+        if 'Correction' in display_df.columns:
+            with_correction = display_df[display_df["Correction"] != "-"].shape[0]
+            st.metric("✏ تحتوي على تصحيح", with_correction)
+        else:
+            st.metric("✏ تحتوي على تصحيح", 0)
     
-    # توزيع النتائج
-    st.markdown("#### 📊 توزيع النتائج")
-    
-    tab1, tab2, tab3 = st.tabs(["حسب الماكينة", "حسب فني الخدمة", "حسب السنة"])
-    
-    with tab1:
-        if not result_df.empty:
-            machine_dist = result_df["Card Number"].value_counts().head(15)
-            dist_df = pd.DataFrame({
-                "رقم الماكينة": machine_dist.index,
-                "عدد الأحداث": machine_dist.values,
-                "النسبة %": (machine_dist.values / len(result_df) * 100).round(1)
-            })
-            st.dataframe(dist_df, use_container_width=True, height=300)
-    
-    with tab2:
-        if "Servised by" in result_df.columns and not result_df[result_df["Servised by"] != "-"].empty:
-            tech_dist = result_df[result_df["Servised by"] != "-"]["Servised by"].value_counts().head(10)
-            tech_df = pd.DataFrame({
-                "فني الخدمة": tech_dist.index,
-                "عدد الأحداث": tech_dist.values,
-                "النسبة %": (tech_dist.values / len(result_df) * 100).round(1)
-            })
-            st.dataframe(tech_df, use_container_width=True, height=300)
-    
-    with tab3:
-        if "Date" in result_df.columns:
-            years = []
-            for date_str in result_df["Date"]:
-                if date_str != "-":
-                    year_match = re.search(r'(\d{4})', str(date_str))
-                    if year_match:
-                        years.append(year_match.group(1))
-            
-            if years:
-                year_stats = pd.Series(years).value_counts().sort_index()
-                year_df = pd.DataFrame({
-                    "السنة": year_stats.index,
-                    "عدد الأحداث": year_stats.values
-                })
-                st.dataframe(year_df, use_container_width=True, height=300)
-    
-    # عرض النتائج الرئيسية
-    st.markdown("### 📋 النتائج التفصيلية")
+    # عرض النتائج بشكل متسلسل
+    st.markdown("### 📋 النتائج التفصيلية (مرتبة)")
     
     # فلترة النتائج
     st.markdown("#### 🔍 فلترة النتائج")
@@ -1608,21 +1539,86 @@ def display_search_results(results, search_params):
         show_with_tech = st.checkbox("👨‍🔧 مع فني خدمة", True, key="filter_tech")
     
     # تطبيق الفلاتر
-    filtered_df = result_df.copy()
+    filtered_df = display_df.copy()
     
-    if not show_with_event:
-        filtered_df = filtered_df[filtered_df["Event"] == "-"]
-    if not show_with_correction:
-        filtered_df = filtered_df[filtered_df["Correction"] == "-"]
-    if not show_with_tech:
-        filtered_df = filtered_df[filtered_df["Servised by"] == "-"]
+    if not show_with_event and 'Event' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Event"] != "-"]
+    if not show_with_correction and 'Correction' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Correction"] != "-"]
+    if not show_with_tech and 'Servised by' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Servised by"] != "-"]
     
-    # عرض البيانات
-    st.dataframe(
-        filtered_df.style.apply(style_table, axis=1),
-        use_container_width=True,
-        height=500
-    )
+    # عرض النتائج
+    if not filtered_df.empty:
+        # استخدام تبويبات لعرض النتائج بطريقتين
+        display_tabs = st.tabs(["📊 عرض جدولي", "📋 عرض تفصيلي حسب الماكينة"])
+        
+        with display_tabs[0]:
+            # العرض الجدولي التقليدي
+            # تحديد الأعمدة المراد عرضها
+            columns_to_show = ['Card Number', 'Event', 'Correction', 'Servised by', 'Tones', 'Date', 'Event_Order', 'Total_Events']
+            columns_to_show = [col for col in columns_to_show if col in filtered_df.columns]
+            
+            st.dataframe(
+                filtered_df[columns_to_show].style.apply(style_table, axis=1),
+                use_container_width=True,
+                height=500
+            )
+        
+        with display_tabs[1]:
+            # عرض تفصيلي لكل ماكينة بشكل منفصل
+            # تجميع الماكينات الفريدة
+            unique_machines = sorted(filtered_df['Card Number'].unique(), 
+                                   key=lambda x: pd.to_numeric(x, errors='coerce') if str(x).isdigit() else float('inf'))
+            
+            for machine in unique_machines:
+                machine_data = filtered_df[filtered_df['Card Number'] == machine].copy()
+                machine_data = machine_data.sort_values('Event_Order')
+                
+                with st.expander(f"🔧 الماكينة {machine} - عدد الأحداث: {len(machine_data)}", expanded=len(unique_machines) <= 5):
+                    
+                    # عرض إحصائيات الماكينة
+                    col_stats1, col_stats2, col_stats3 = st.columns(3)
+                    with col_stats1:
+                        if not machine_data.empty and 'Date' in machine_data.columns:
+                            st.metric("📅 أول حدث", machine_data['Date'].iloc[0] if machine_data['Date'].iloc[0] != "-" else "غير محدد")
+                        else:
+                            st.metric("📅 أول حدث", "-")
+                    with col_stats2:
+                        if not machine_data.empty and 'Date' in machine_data.columns:
+                            st.metric("📅 آخر حدث", machine_data['Date'].iloc[-1] if machine_data['Date'].iloc[-1] != "-" else "غير محدد")
+                        else:
+                            st.metric("📅 آخر حدث", "-")
+                    with col_stats3:
+                        if not machine_data.empty and 'Servised by' in machine_data.columns:
+                            tech_count = machine_data['Servised by'].nunique()
+                            st.metric("👨‍🔧 فنيين مختلفين", tech_count)
+                        else:
+                            st.metric("👨‍🔧 فنيين مختلفين", 0)
+                    
+                    # عرض أحداث الماكينة
+                    for idx, row in machine_data.iterrows():
+                        st.markdown("---")
+                        col_event1, col_event2 = st.columns([3, 2])
+                        
+                        with col_event1:
+                            event_order = row.get('Event_Order', '?')
+                            total_events = row.get('Total_Events', '?')
+                            st.markdown(f"**الحدث #{event_order} من {total_events}**")
+                            if 'Date' in row:
+                                st.markdown(f"**📅 التاريخ:** {row['Date']}")
+                            if 'Event' in row and row['Event'] != '-':
+                                st.markdown(f"**📝 الحدث:** {row['Event']}")
+                            if 'Correction' in row and row['Correction'] != '-':
+                                st.markdown(f"**✏ التصحيح:** {row['Correction']}")
+                        
+                        with col_event2:
+                            if 'Servised by' in row and row['Servised by'] != '-':
+                                st.markdown(f"**👨‍🔧 فني الخدمة:** {row['Servised by']}")
+                            if 'Tones' in row and row['Tones'] != '-':
+                                st.markdown(f"**⚖️ الأطنان:** {row['Tones']}")
+    else:
+        st.warning("⚠ لم يتم العثور على نتائج تطابق معايير الفلترة")
     
     # خيارات التصدير
     st.markdown("---")
@@ -1631,28 +1627,68 @@ def display_search_results(results, search_params):
     export_col1, export_col2 = st.columns(2)
     
     with export_col1:
-        # تصدير Excel
-        buffer_excel = io.BytesIO()
-        result_df.to_excel(buffer_excel, index=False, engine="openpyxl")
-        st.download_button(
-            label="📊 حفظ كملف Excel",
-            data=buffer_excel.getvalue(),
-            file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        # تصدير Excel - استخدام البيانات الأصلية وترتيبها بشكل صحيح
+        if not result_df.empty:
+            buffer_excel = io.BytesIO()
+            
+            # إنشاء نسخة للتصدير مع ترتيب صحيح
+            export_df = result_df.copy()
+            
+            # إضافة أعمدة التنظيف للترتيب
+            export_df['Card_Number_Clean_Export'] = pd.to_numeric(export_df['Card Number'], errors='coerce')
+            export_df['Date_Clean_Export'] = pd.to_datetime(export_df['Date'], errors='coerce', dayfirst=True)
+            
+            # ترتيب البيانات
+            export_df = export_df.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], 
+                                             ascending=[True, False], na_position='last')
+            
+            # إزالة الأعمدة المؤقتة
+            export_df = export_df.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
+            
+            # حفظ الملف
+            export_df.to_excel(buffer_excel, index=False, engine="openpyxl")
+            
+            st.download_button(
+                label="📊 حفظ كملف Excel",
+                data=buffer_excel.getvalue(),
+                file_name=f"بحث_أحداث_مرتب_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        else:
+            st.info("⚠ لا توجد بيانات للتصدير")
     
     with export_col2:
         # تصدير CSV
-        buffer_csv = io.BytesIO()
-        result_df.to_csv(buffer_csv, index=False, encoding='utf-8-sig')
-        st.download_button(
-            label="📄 حفظ كملف CSV",
-            data=buffer_csv.getvalue(),
-            file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        if not result_df.empty:
+            buffer_csv = io.BytesIO()
+            
+            # إنشاء نسخة للتصدير مع ترتيب صحيح
+            export_csv = result_df.copy()
+            
+            # إضافة أعمدة التنظيف للترتيب
+            export_csv['Card_Number_Clean_Export'] = pd.to_numeric(export_csv['Card Number'], errors='coerce')
+            export_csv['Date_Clean_Export'] = pd.to_datetime(export_csv['Date'], errors='coerce', dayfirst=True)
+            
+            # ترتيب البيانات
+            export_csv = export_csv.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], 
+                                               ascending=[True, False], na_position='last')
+            
+            # إزالة الأعمدة المؤقتة
+            export_csv = export_csv.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
+            
+            # حفظ الملف
+            export_csv.to_csv(buffer_csv, index=False, encoding='utf-8-sig')
+            
+            st.download_button(
+                label="📄 حفظ كملف CSV",
+                data=buffer_csv.getvalue(),
+                file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.info("⚠ لا توجد بيانات للتصدير")
 
 # -------------------------------
 # 🖥 دالة إضافة إيفينت جديد - في الشيت المنفصل
