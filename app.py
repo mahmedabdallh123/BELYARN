@@ -6,6 +6,7 @@ import io
 import requests
 import shutil
 import re
+import numpy as np
 from datetime import datetime, timedelta
 from base64 import b64decode
 
@@ -17,26 +18,32 @@ except Exception:
     GITHUB_AVAILABLE = False
 
 # ===============================
-# ⚙ إعدادات التطبيق - يمكن تعديلها بسهولة
+# ⚙ إعدادات التطبيق
 # ===============================
 APP_CONFIG = {
-    # إعدادات التطبيق العامة
-    "APP_TITLE": "سيرفيس تحضيرات بيل يارن 1",
+    "APP_TITLE": "CMMS - bel",
     "APP_ICON": "🏭",
-    
-    # إعدادات GitHub
     "REPO_NAME": "mahmedabdallh123/Elqds",
     "BRANCH": "main",
     "FILE_PATH": "l4.xlsx",
     "LOCAL_FILE": "l4.xlsx",
-    
-    # إعدادات الأمان
     "MAX_ACTIVE_USERS": 2,
     "SESSION_DURATION_MINUTES": 15,
-    
-    # إعدادات الواجهة
     "SHOW_TECH_SUPPORT_TO_ALL": False,
     "CUSTOM_TABS": ["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن", "🛠 تعديل وإدارة البيانات", "👥 إدارة المستخدمين", "📞 الدعم الفني"]
+}
+
+# إعدادات الألوان
+COLOR_CONFIG = {
+    "service_done": "#d4edda",  # أخضر فاتح
+    "service_not_done": "#f8d7da",  # أحمر فاتح
+    "service_partial": "#fff3cd",  # أصفر فاتح
+    "row_added": "#e8f5e8",  # أخضر شفاف
+    "row_deleted": "#ffebee",  # أحمر شفاف
+    "row_modified": "#e3f2fd",  # أزرق شفاف
+    "header": "#f0f2f6",  # لون الرأس
+    "even_row": "#ffffff",  # صف زوجي
+    "odd_row": "#f9f9f9"  # صف فردي
 }
 
 # ===============================
@@ -46,70 +53,53 @@ USERS_FILE = "users.json"
 STATE_FILE = "state.json"
 SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
-
-# إنشاء رابط GitHub تلقائياً من الإعدادات
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
-# -------------------------------
-# 🧩 دوال مساعدة للملفات والحالة
-# -------------------------------
+# ===============================
+# 🧠 وظائف المصادقة
+# ===============================
 def load_users():
-    """تحميل بيانات المستخدمين من ملف JSON"""
     if not os.path.exists(USERS_FILE):
-        # إنشاء مستخدمين افتراضيين مع الصلاحيات المطلوبة
         default_users = {
             "admin": {
                 "password": "admin123", 
                 "role": "admin", 
                 "created_at": datetime.now().isoformat(),
                 "permissions": ["all"]
-            },
-            "user1": {
-                "password": "user1123", 
-                "role": "editor", 
-                "created_at": datetime.now().isoformat(),
-                "permissions": ["view", "edit"]
-            },
-            "user2": {
-                "password": "user2123", 
-                "role": "viewer", 
-                "created_at": datetime.now().isoformat(),
-                "permissions": ["view"]
             }
         }
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(default_users, f, indent=4, ensure_ascii=False)
         return default_users
+    
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             users = json.load(f)
-            # التأكد من وجود جميع الحقول المطلوبة لكل مستخدم
-            for username, user_data in users.items():
-                if "role" not in user_data:
-                    # تحديد الدور بناءً على اسم المستخدم إذا لم يكن موجوداً
-                    if username == "admin":
-                        user_data["role"] = "admin"
-                        user_data["permissions"] = ["all"]
-                    else:
-                        user_data["role"] = "viewer"
-                        user_data["permissions"] = ["view"]
-                
-                if "permissions" not in user_data:
-                    # تعيين الصلاحيات الافتراضية بناءً على الدور
-                    if user_data["role"] == "admin":
-                        user_data["permissions"] = ["all"]
-                    elif user_data["role"] == "editor":
-                        user_data["permissions"] = ["view", "edit"]
-                    else:
-                        user_data["permissions"] = ["view"]
-                        
-                if "created_at" not in user_data:
-                    user_data["created_at"] = datetime.now().isoformat()
+        
+        if "admin" not in users:
+            users["admin"] = {
+                "password": "admin123", 
+                "role": "admin", 
+                "created_at": datetime.now().isoformat(),
+                "permissions": ["all"]
+            }
+            with open(USERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(users, f, indent=4, ensure_ascii=False)
+        
+        for username, user_data in users.items():
+            if "role" not in user_data:
+                user_data["role"] = "admin" if username == "admin" else "viewer"
+                user_data["permissions"] = ["all"] if username == "admin" else ["view"]
                     
-            return users
+            if "created_at" not in user_data:
+                user_data["created_at"] = datetime.now().isoformat()
+        
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=4, ensure_ascii=False)
+        
+        return users
     except Exception as e:
         st.error(f"❌ خطأ في ملف users.json: {e}")
-        # إرجاع المستخدمين الافتراضيين في حالة الخطأ
         return {
             "admin": {
                 "password": "admin123", 
@@ -120,7 +110,6 @@ def load_users():
         }
 
 def save_users(users):
-    """حفظ بيانات المستخدمين إلى ملف JSON"""
     try:
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(users, f, indent=4, ensure_ascii=False)
@@ -177,9 +166,6 @@ def remaining_time(state, username):
     except:
         return None
 
-# -------------------------------
-# 🔐 تسجيل الخروج
-# -------------------------------
 def logout_action():
     state = load_state()
     username = st.session_state.get("username")
@@ -192,9 +178,6 @@ def logout_action():
         st.session_state.pop(k, None)
     st.rerun()
 
-# -------------------------------
-# 🧠 واجهة تسجيل الدخول
-# -------------------------------
 def login_ui():
     users = load_users()
     state = cleanup_sessions(load_state())
@@ -206,7 +189,6 @@ def login_ui():
 
     st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
 
-    # تحميل قائمة المستخدمين مباشرة من الملف
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             current_users = json.load(f)
@@ -214,7 +196,6 @@ def login_ui():
     except:
         user_list = list(users.keys())
 
-    # اختيار المستخدم
     username_input = st.selectbox("👤 اختر المستخدم", user_list)
     password = st.text_input("🔑 كلمة المرور", type="password")
 
@@ -224,7 +205,6 @@ def login_ui():
 
     if not st.session_state.logged_in:
         if st.button("تسجيل الدخول"):
-            # تحميل المستخدمين من جديد للتأكد من أحدث بيانات
             current_users = load_users()
             
             if username_input in current_users and current_users[username_input]["password"] == password:
@@ -265,17 +245,38 @@ def login_ui():
             logout_action()
         return True
 
-# -------------------------------
-# 🔄 طرق جلب الملف من GitHub
-# -------------------------------
+def get_user_permissions(user_role, user_permissions):
+    if user_role == "admin":
+        return {
+            "can_view": True,
+            "can_edit": True,
+            "can_manage_users": True,
+            "can_see_tech_support": True
+        }
+    elif user_role == "editor":
+        return {
+            "can_view": True,
+            "can_edit": True,
+            "can_manage_users": False,
+            "can_see_tech_support": False
+        }
+    else:
+        return {
+            "can_view": "view" in user_permissions or "edit" in user_permissions or "all" in user_permissions,
+            "can_edit": "edit" in user_permissions or "all" in user_permissions,
+            "can_manage_users": "manage_users" in user_permissions or "all" in user_permissions,
+            "can_see_tech_support": "tech_support" in user_permissions or "all" in user_permissions
+        }
+
+# ===============================
+# 📁 وظائف إدارة الملفات
+# ===============================
 def fetch_from_github_requests():
-    """تحميل بإستخدام رابط RAW (requests)"""
     try:
         response = requests.get(GITHUB_EXCEL_URL, stream=True, timeout=15)
         response.raise_for_status()
         with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
             shutil.copyfileobj(response.raw, f)
-        # امسح الكاش
         try:
             st.cache_data.clear()
         except:
@@ -285,83 +286,45 @@ def fetch_from_github_requests():
         st.error(f"⚠ فشل التحديث من GitHub: {e}")
         return False
 
-def fetch_from_github_api():
-    """تحميل عبر GitHub API (باستخدام PyGithub token في secrets)"""
-    if not GITHUB_AVAILABLE:
-        return fetch_from_github_requests()
-    
-    try:
-        token = st.secrets.get("github", {}).get("token", None)
-        if not token:
-            return fetch_from_github_requests()
-        
-        g = Github(token)
-        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
-        file_content = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
-        content = b64decode(file_content.content)
-        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
-            f.write(content)
-        try:
-            st.cache_data.clear()
-        except:
-            pass
-        return True
-    except Exception as e:
-        st.error(f"⚠ فشل تحميل الملف من GitHub: {e}")
-        return False
-
-# -------------------------------
-# 📂 تحميل الشيتات (مخبأ) - معدل لقراءة جميع الشيتات
-# -------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_sheets():
-    """تحميل جميع الشيتات من ملف Excel"""
     if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
         return None
     
     try:
-        # قراءة جميع الشيتات
         sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None)
         
         if not sheets:
             return None
         
-        # تنظيف أسماء الأعمدة لكل شيت
         for name, df in sheets.items():
             df.columns = df.columns.astype(str).str.strip()
         
         return sheets
     except Exception as e:
+        st.error(f"❌ خطأ في تحميل الملف: {e}")
         return None
 
-# نسخة مع dtype=object لواجهة التحرير
 @st.cache_data(show_spinner=False)
 def load_sheets_for_edit():
-    """تحميل جميع الشيتات للتحرير"""
     if not os.path.exists(APP_CONFIG["LOCAL_FILE"]):
         return None
     
     try:
-        # قراءة جميع الشيتات مع dtype=object للحفاظ على تنسيق البيانات
         sheets = pd.read_excel(APP_CONFIG["LOCAL_FILE"], sheet_name=None, dtype=object)
         
         if not sheets:
             return None
         
-        # تنظيف أسماء الأعمدة لكل شيت
         for name, df in sheets.items():
             df.columns = df.columns.astype(str).str.strip()
         
         return sheets
     except Exception as e:
+        st.error(f"❌ خطأ في تحميل الملف للتحرير: {e}")
         return None
 
-# -------------------------------
-# 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل
-# -------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
-    """دالة محسنة للحفظ التلقائي المحلي والرفع إلى GitHub"""
-    # احفظ محلياً
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
@@ -373,13 +336,11 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         st.error(f"⚠ خطأ أثناء الحفظ المحلي: {e}")
         return None
 
-    # امسح الكاش
     try:
         st.cache_data.clear()
     except:
         pass
 
-    # حاول الرفع عبر PyGithub token في secrets
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
         st.warning("⚠ لم يتم العثور على GitHub token. سيتم الحفظ محلياً فقط.")
@@ -401,7 +362,6 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
             st.success(f"✅ تم الحفظ والرفع إلى GitHub بنجاح: {commit_message}")
             return load_sheets_for_edit()
         except Exception as e:
-            # حاول رفع كملف جديد أو إنشاء
             try:
                 result = repo.create_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, branch=APP_CONFIG["BRANCH"])
                 st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
@@ -415,7 +375,6 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         return None
 
 def auto_save_to_github(sheets_dict, operation_description):
-    """دالة الحفظ التلقائي المحسنة"""
     username = st.session_state.get("username", "unknown")
     commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     
@@ -427,9 +386,9 @@ def auto_save_to_github(sheets_dict, operation_description):
         st.error("❌ فشل الحفظ التلقائي")
         return sheets_dict
 
-# -------------------------------
-# 🧰 دوال مساعدة للمعالجة والنصوص
-# -------------------------------
+# ===============================
+# 🛠 وظائف مساعدة
+# ===============================
 def normalize_name(s):
     if s is None: return ""
     s = str(s).replace("\n", "+")
@@ -460,53 +419,19 @@ def highlight_cell(val, col_name):
 def style_table(row):
     return [highlight_cell(row[col], col) for col in row.index]
 
-def get_user_permissions(user_role, user_permissions):
-    """الحصول على صلاحيات المستخدم بناءً على الدور والصلاحيات"""
-    # إذا كان الدور admin، يعطى جميع الصلاحيات
-    if user_role == "admin":
-        return {
-            "can_view": True,
-            "can_edit": True,
-            "can_manage_users": True,
-            "can_see_tech_support": True
-        }
-    
-    # إذا كان الدور editor
-    elif user_role == "editor":
-        return {
-            "can_view": True,
-            "can_edit": True,
-            "can_manage_users": False,
-            "can_see_tech_support": False
-        }
-    
-    # إذا كان الدور viewer أو أي دور آخر
-    else:
-        # التحقق من الصلاحيات الفردية
-        return {
-            "can_view": "view" in user_permissions or "edit" in user_permissions or "all" in user_permissions,
-            "can_edit": "edit" in user_permissions or "all" in user_permissions,
-            "can_manage_users": "manage_users" in user_permissions or "all" in user_permissions,
-            "can_see_tech_support": "tech_support" in user_permissions or "all" in user_permissions
-        }
-
 def get_servised_by_value(row):
-    """استخراج قيمة فني الخدمة من الصف"""
-    # قائمة بالأعمدة المحتملة لفني الخدمة
     servised_columns = [
         "Servised by", "SERVISED BY", "servised by", "Servised By",
         "Serviced by", "Service by", "Serviced By", "Service By",
         "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"
     ]
     
-    # البحث في الأعمدة المعروفة
     for col in servised_columns:
         if col in row.index:
             value = str(row[col]).strip()
             if value and value.lower() not in ["nan", "none", ""]:
                 return value
     
-    # البحث في جميع الأعمدة التي قد تحتوي على فني الخدمة
     for col in row.index:
         col_normalized = normalize_name(col)
         if any(keyword in col_normalized for keyword in ["servisedby", "servicedby", "serviceby", "خدمبواسطة", "فني"]):
@@ -516,11 +441,67 @@ def get_servised_by_value(row):
     
     return "-"
 
-# -------------------------------
-# 🖥 دالة فحص السيرفيس فقط - من الشيتات الجديدة
-# -------------------------------
+# ===============================
+# 🎨 وظائف التلوين
+# ===============================
+def color_service_row(row):
+    """تلوين صفوف فحص السيرفيس حسب الحالة"""
+    service_needed = row.get("Service Needed", "-")
+    service_done = row.get("Service Done", "-")
+    service_not_done = row.get("Service Didn't Done", "-")
+    
+    if service_done == "-":
+        # لا يوجد أي خدمة منفذة
+        return [f"background-color: {COLOR_CONFIG['service_not_done']}"] * len(row)
+    elif service_not_done == "-":
+        # كل الخدمات منفذة
+        return [f"background-color: {COLOR_CONFIG['service_done']}"] * len(row)
+    else:
+        # بعض الخدمات منفذة والبعض الآخر لا
+        return [f"background-color: {COLOR_CONFIG['service_partial']}"] * len(row)
+
+def color_edit_row(row, row_index, added_rows=None, deleted_rows=None):
+    """تلوين صفوف التحرير"""
+    added_rows = added_rows or []
+    deleted_rows = deleted_rows or []
+    
+    if row_index in added_rows:
+        return [f"background-color: {COLOR_CONFIG['row_added']}"] * len(row)
+    elif row_index in deleted_rows:
+        return [f"background-color: {COLOR_CONFIG['row_deleted']}"] * len(row)
+    else:
+        if row_index % 2 == 0:
+            return [f"background-color: {COLOR_CONFIG['even_row']}"] * len(row)
+        else:
+            return [f"background-color: {COLOR_CONFIG['odd_row']}"] * len(row)
+
+def apply_table_styling(df, row_coloring_func, row_indices=None):
+    """تطبيق التنسيق على الجدول"""
+    if row_indices is None:
+        row_indices = df.index
+    
+    styled_df = df.style.apply(row_coloring_func, axis=1, row_indices=row_indices)
+    
+    # تنسيق الرأس
+    styled_df = styled_df.set_properties(**{
+        'background-color': COLOR_CONFIG['header'],
+        'font-weight': 'bold',
+        'border': '1px solid #ddd'
+    }, subset=pd.IndexSlice[:, :])
+    
+    # تنسيق الخلايا
+    styled_df = styled_df.set_properties(**{
+        'border': '1px solid #ddd',
+        'padding': '5px'
+    })
+    
+    return styled_df
+
+# ===============================
+# 📊 فحص السيرفيس مع تلوين وإحصائيات محسنة (من الكود الثاني)
+# ===============================
 def check_service_status(card_num, current_tons, all_sheets):
-    """فحص حالة السيرفيس فقط"""
+    """فحص حالة السيرفيس فقط - من الكود الثاني"""
     if not all_sheets:
         st.error("❌ لم يتم تحميل أي شيتات.")
         return
@@ -708,11 +689,15 @@ def check_service_status(card_num, current_tons, all_sheets):
 
     st.markdown("### 📋 نتائج فحص السيرفيس")
     if not result_df.empty:
-        st.dataframe(result_df.style.apply(style_table, axis=1), use_container_width=True)
-
-        # عرض الإحصائيات والنسب
+        # تطبيق التلوين على النتائج من الكود الأول
+        styled_df = result_df.style.apply(color_service_row, axis=1)
+        
+        # عرض الجدول مع التلوين
+        st.dataframe(styled_df, use_container_width=True, height=400)
+        
+        # عرض الإحصائيات من الكود الثاني
         show_service_statistics(service_stats, result_df)
-
+        
         # تنزيل النتائج
         buffer = io.BytesIO()
         result_df.to_excel(buffer, index=False, engine="openpyxl")
@@ -726,7 +711,7 @@ def check_service_status(card_num, current_tons, all_sheets):
         st.info("ℹ️ لا توجد خدمات مسجلة لهذه الماكينة.")
 
 def show_service_statistics(service_stats, result_df):
-    """عرض الإحصائيات والنسب المئوية لفحص السيرفيس"""
+    """عرض الإحصائيات والنسب المئوية لفحص السيرفيس - من الكود الثاني"""
     st.markdown("---")
     st.markdown("### 📊 الإحصائيات والنسب المئوية")
     
@@ -935,88 +920,141 @@ def show_service_statistics(service_stats, result_df):
         if slice_stats_data:
             slice_stats_df = pd.DataFrame(slice_stats_data)
             st.dataframe(slice_stats_df, use_container_width=True, height=400)
-            
-            # محاولة استخدام plotly للمخططات التفاعلية
-            try:
-                import plotly.graph_objects as go
-                
-                # تحليل نطاقات الشرائح
-                slice_ranges = []
-                completion_rates = []
-                
-                for slice_item in slice_stats_data:
-                    slice_key = slice_item["الشريحة"]
-                    slice_range = slice_key.split("-")
-                    if len(slice_range) == 2:
-                        try:
-                            mid_point = (int(slice_range[0]) + int(slice_range[1])) / 2
-                            slice_ranges.append(mid_point)
-                            
-                            # استخراج النسبة من النص
-                            rate_text = slice_item["نسبة الإنجاز"]
-                            rate_value = float(rate_text.replace("%", "").strip())
-                            completion_rates.append(rate_value)
-                        except:
-                            continue
-                
-                if slice_ranges and completion_rates:
-                    fig3 = go.Figure()
-                    fig3.add_trace(go.Scatter(
-                        x=slice_ranges,
-                        y=completion_rates,
-                        mode='lines+markers',
-                        name='نسبة الإنجاز',
-                        line=dict(color='#4ECDC4', width=3),
-                        marker=dict(size=10, color='#FF6B6B')
-                    ))
-                    
-                    fig3.update_layout(
-                        title="نسبة الإنجاز حسب نطاق الأطنان",
-                        xaxis_title="نطاق الأطنان (منتصف الشريحة)",
-                        yaxis_title="نسبة الإنجاز (%)",
-                        height=400,
-                        showlegend=True
-                    )
-                    
-                    st.plotly_chart(fig3, use_container_width=True)
-                    
-            except ImportError:
-                # استخدام streamlit line chart بديل
-                if slice_stats_data:
-                    # تحضير البيانات للرسم البياني
-                    chart_data = []
-                    for slice_item in slice_stats_data:
-                        slice_key = slice_item["الشريحة"]
-                        slice_range = slice_key.split("-")
-                        if len(slice_range) == 2:
-                            try:
-                                mid_point = (int(slice_range[0]) + int(slice_range[1])) / 2
-                                rate_text = slice_item["نسبة الإنجاز"]
-                                rate_value = float(rate_text.replace("%", "").strip())
-                                
-                                chart_data.append({
-                                    "نطاق الأطنان": mid_point,
-                                    "نسبة الإنجاز": rate_value
-                                })
-                            except:
-                                continue
-                    
-                    if chart_data:
-                        chart_df = pd.DataFrame(chart_data).sort_values("نطاق الأطنان")
-                        st.line_chart(chart_df.set_index("نطاق الأطنان"), height=400)
-        else:
-            st.info("ℹ️ لا توجد بيانات إحصائية للشرائح.")
 
-# -------------------------------
-# 🖥 دالة فحص الإيفينت والكوريكشن - واجهة مبسطة واحترافية
-# -------------------------------
+# ===============================
+# ⏱️ التحليل الزمني المحسن للأحداث
+# ===============================
+def parse_date(date_str):
+    """تحويل التاريخ إلى كائن datetime"""
+    if not date_str or pd.isna(date_str) or str(date_str).strip() in ["-", "nan", "null", "none"]:
+        return None
+    
+    date_str = str(date_str).strip()
+    
+    # تحويل الأرقام العربية إلى إنجليزية
+    arabic_to_english = {
+        '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+        '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
+    }
+    
+    converted_date = ""
+    for char in date_str:
+        converted_date += arabic_to_english.get(char, char)
+    
+    # أنماط التاريخ المحتملة
+    patterns = [
+        (r'(\d{1,2})[/\-\\\.](\d{1,2})[/\-\\\.](\d{4})', lambda m: datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))),
+        (r'(\d{4})[/\-\\\.](\d{1,2})[/\-\\\.](\d{1,2})', lambda m: datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))),
+        (r'(\d{1,2})[/\-\\\.](\d{1,2})[/\-\\\.](\d{2})', lambda m: datetime(2000 + int(m.group(3)), int(m.group(2)), int(m.group(1)))),
+    ]
+    
+    for pattern, converter in patterns:
+        match = re.match(pattern, converted_date)
+        if match:
+            try:
+                return converter(match)
+            except:
+                continue
+    
+    return None
+
+def analyze_event_time_intervals_enhanced(results_df, event_keyword):
+    """تحليل زمني محسّن للأحداث مع ترتيب حسب الماكينة"""
+    if results_df.empty or 'Event' not in results_df.columns or 'Date' not in results_df.columns:
+        return None
+    
+    filtered_events = results_df[results_df['Event'].astype(str).str.contains(event_keyword, case=False, na=False)].copy()
+    
+    if filtered_events.empty:
+        return None
+    
+    filtered_events['Parsed_Date'] = filtered_events['Date'].apply(parse_date)
+    filtered_events = filtered_events[filtered_events['Parsed_Date'].notna()]
+    
+    if filtered_events.empty:
+        return None
+    
+    filtered_events['Card_Number_Clean'] = pd.to_numeric(filtered_events['Card Number'], errors='coerce')
+    filtered_events = filtered_events.sort_values(['Card_Number_Clean', 'Parsed_Date'])
+    
+    machine_analysis = {}
+    all_intervals = []
+    
+    for machine in filtered_events['Card Number'].unique():
+        machine_events = filtered_events[filtered_events['Card Number'] == machine]
+        machine_events = machine_events.sort_values('Parsed_Date')
+        
+        machine_intervals = []
+        total_events = len(machine_events)
+        
+        if total_events > 1:
+            for i in range(total_events - 1):
+                current = machine_events.iloc[i]
+                next_event = machine_events.iloc[i + 1]
+                
+                days_between = (next_event['Parsed_Date'] - current['Parsed_Date']).days
+                
+                interval_data = {
+                    'الماكينة': machine,
+                    'رقم الحدث': f"{i+1} → {i+2}",
+                    'الحدث الأول': str(current['Event'])[:50] + ('...' if len(str(current['Event'])) > 50 else ''),
+                    'التاريخ الأول': current['Date'],
+                    'الحدث التالي': str(next_event['Event'])[:50] + ('...' if len(str(next_event['Event'])) > 50 else ''),
+                    'التاريخ التالي': next_event['Date'],
+                    'الأيام بينهما': days_between,
+                    'الأسابيع بينهما': round(days_between / 7, 1),
+                    'الأشهر بينهما': round(days_between / 30, 1),
+                    'فني الخدمة (الأول)': current.get('Servised by', '-'),
+                    'فني الخدمة (التالي)': next_event.get('Servised by', '-')
+                }
+                
+                machine_intervals.append(interval_data)
+                all_intervals.append(interval_data)
+        
+        if machine_intervals:
+            days_list = [interval['الأيام بينهما'] for interval in machine_intervals]
+            machine_analysis[machine] = {
+                'عدد الأحداث': total_events,
+                'عدد الفترات': len(machine_intervals),
+                'أقصر فترة (يوم)': min(days_list) if days_list else 0,
+                'أطول فترة (يوم)': max(days_list) if days_list else 0,
+                'متوسط الفترة (يوم)': round(np.mean(days_list), 1) if days_list else 0,
+                'الوسيط (يوم)': np.median(days_list) if days_list else 0,
+                'الفترات': machine_intervals
+            }
+    
+    if all_intervals:
+        days_list = [interval['الأيام بينهما'] for interval in all_intervals]
+        general_stats = {
+            'إجمالي الأحداث': len(filtered_events),
+            'عدد الماكينات': filtered_events['Card Number'].nunique(),
+            'إجمالي الفترات': len(all_intervals),
+            'أقصر فترة عامة (يوم)': min(days_list),
+            'أطول فترة عامة (يوم)': max(days_list),
+            'المتوسط العام (يوم)': round(np.mean(days_list), 1),
+            'الوسيط العام (يوم)': np.median(days_list),
+            'الانحراف المعياري (يوم)': round(np.std(days_list), 1) if len(days_list) > 1 else 0
+        }
+    else:
+        general_stats = None
+    
+    return {
+        'event_keyword': event_keyword,
+        'filtered_events': filtered_events,
+        'machine_analysis': machine_analysis,
+        'all_intervals': all_intervals,
+        'general_stats': general_stats
+    }
+
+# ===============================
+# 🔍 فحص الإيفينت والكوريكشن مع التحليل الزمني
+# ===============================
 def check_events_and_corrections(all_sheets):
-    """فحص الإيفينت والكوريكشن بواجهة مبسطة واحترافية"""
+    """فحص الإيفينت والكوريكشن"""
     if not all_sheets:
         st.error("❌ لم يتم تحميل أي شيتات.")
         return
     
-    # تهيئة session state إذا لزم الأمر
     if "search_params" not in st.session_state:
         st.session_state.search_params = {
             "card_numbers": "",
@@ -1031,140 +1069,101 @@ def check_events_and_corrections(all_sheets):
     if "search_triggered" not in st.session_state:
         st.session_state.search_triggered = False
     
-    # قسم البحث - واجهة احترافية
-    with st.container():
-        st.markdown("### 🔍 بحث متعدد المعايير")
-        st.markdown("استخدم الحقول التالية للبحث المحدد. يمكنك ملء واحد أو أكثر من الحقول.")
-        
-        # تقسيم الشاشة إلى أعمدة
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            # قسم أرقام الماكينات
-            with st.expander("🔢 **أرقام الماكينات**", expanded=True):
-                st.caption("أدخل أرقام الماكينات (مفصولة بفواصل أو نطاقات)")
-                card_numbers = st.text_input(
-                    "مثال: 1,3,5 أو 1-5 أو 2,4,7-10",
-                    value=st.session_state.search_params.get("card_numbers", ""),
-                    key="input_cards",
-                    placeholder="اتركه فارغاً للبحث في كل الماكينات"
-                )
-                
-                # أزرار سريعة لأرقام الماكينات
-                st.caption("أو اختر من:")
-                quick_cards_col1, quick_cards_col2, quick_cards_col3 = st.columns(3)
-                with quick_cards_col1:
-                    if st.button("🔟 أول 10 ماكينات", key="quick_10"):
-                        st.session_state.search_params["card_numbers"] = "1-10"
-                        st.session_state.search_triggered = True
-                        st.rerun()
-                with quick_cards_col2:
-                    if st.button("🔟 ماكينات 11-20", key="quick_20"):
-                        st.session_state.search_params["card_numbers"] = "11-20"
-                        st.session_state.search_triggered = True
-                        st.rerun()
-                with quick_cards_col3:
-                    if st.button("🗑 مسح", key="clear_cards"):
-                        st.session_state.search_params["card_numbers"] = ""
-                        st.rerun()
-            
-            # قسم التواريخ
-            with st.expander("📅 **التواريخ**", expanded=True):
-                st.caption("ابحث بالتاريخ (سنة، شهر/سنة)")
-                date_input = st.text_input(
-                    "مثال: 2024 أو 1/2024 أو 2024,2025",
-                    value=st.session_state.search_params.get("date_range", ""),
-                    key="input_date",
-                    placeholder="اتركه فارغاً للبحث في كل التواريخ"
-                )
-        
-        with col2:
-            # قسم فنيي الخدمة
-            with st.expander("👨‍🔧 **فنيو الخدمة**", expanded=True):
-                st.caption("ابحث بأسماء فنيي الخدمة")
-                tech_names = st.text_input(
-                    "مثال: أحمد, محمد, علي",
-                    value=st.session_state.search_params.get("tech_names", ""),
-                    key="input_techs",
-                    placeholder="اتركه فارغاً للبحث في كل الفنيين"
-                )
-            
-            # قسم نص البحث
-            with st.expander("📝 **نص البحث**", expanded=True):
-                st.caption("ابحث في وصف الحدث أو التصحيح")
-                search_text = st.text_input(
-                    "مثال: صيانة, إصلاح, تغيير",
-                    value=st.session_state.search_params.get("search_text", ""),
-                    key="input_text",
-                    placeholder="اتركه فارغاً للبحث في كل النصوص"
-                )
-        
-        # قسم خيارات البحث المتقدمة
-        with st.expander("⚙ **خيارات متقدمة**", expanded=False):
-            col_adv1, col_adv2, col_adv3 = st.columns(3)
-            with col_adv1:
-                search_mode = st.radio(
-                    "🔍 طريقة البحث:",
-                    ["بحث جزئي", "مطابقة كاملة"],
-                    index=0 if not st.session_state.search_params.get("exact_match") else 1,
-                    key="radio_search_mode",
-                    help="بحث جزئي: يبحث عن النص في أي مكان. مطابقة كاملة: يبحث عن النص مطابق تماماً"
-                )
-            with col_adv2:
-                include_empty = st.checkbox(
-                    "🔍 تضمين الحقول الفارغة",
-                    value=st.session_state.search_params.get("include_empty", True),
-                    key="checkbox_include_empty",
-                    help="تضمين النتائج التي تحتوي على حقول فارغة"
-                )
-            with col_adv3:
-                sort_by = st.selectbox(
-                    "📊 ترتيب النتائج:",
-                    ["رقم الماكينة", "التاريخ", "فني الخدمة"],
-                    index=["رقم الماكينة", "التاريخ", "فني الخدمة"].index(
-                        st.session_state.search_params.get("sort_by", "رقم الماكينة")
-                    ),
-                    key="select_sort_by"
-                )
-        
-        # زر البحث الرئيسي
-        st.markdown("---")
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
-        with col_btn1:
-            search_clicked = st.button(
-                "🔍 **بدء البحث**",
-                type="primary",
-                use_container_width=True,
-                key="main_search_btn"
-            )
-        with col_btn2:
-            if st.button("🗑 **مسح الحقول**", use_container_width=True, key="clear_fields"):
-                st.session_state.search_params = {
-                    "card_numbers": "",
-                    "date_range": "",
-                    "tech_names": "",
-                    "search_text": "",
-                    "exact_match": False,
-                    "include_empty": True,
-                    "sort_by": "رقم الماكينة"
-                }
-                st.session_state.search_triggered = False
-                st.rerun()
-        with col_btn3:
-            if st.button("📊 **عرض كل البيانات**", use_container_width=True, key="show_all"):
-                st.session_state.search_params = {
-                    "card_numbers": "",
-                    "date_range": "",
-                    "tech_names": "",
-                    "search_text": "",
-                    "exact_match": False,
-                    "include_empty": True,
-                    "sort_by": "رقم الماكينة"
-                }
-                st.session_state.search_triggered = True
-                st.rerun()
+    st.markdown("### 🔍 بحث متعدد المعايير")
     
-    # تحديث معايير البحث عند تغيير الحقول
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        card_numbers = st.text_input(
+            "🔢 أرقام الماكينات (مثال: 1,3,5 أو 1-5):",
+            value=st.session_state.search_params.get("card_numbers", ""),
+            key="input_cards",
+            placeholder="اتركه فارغاً للبحث في كل الماكينات"
+        )
+        
+        date_input = st.text_input(
+            "📅 التواريخ (مثال: 2024 أو 1/2024):",
+            value=st.session_state.search_params.get("date_range", ""),
+            key="input_date",
+            placeholder="اتركه فارغاً للبحث في كل التواريخ"
+        )
+    
+    with col2:
+        tech_names = st.text_input(
+            "👨‍🔧 فنيو الخدمة (مثال: أحمد, محمد, علي):",
+            value=st.session_state.search_params.get("tech_names", ""),
+            key="input_techs",
+            placeholder="اتركه فارغاً للبحث في كل الفنيين"
+        )
+        
+        search_text = st.text_input(
+            "📝 نص البحث (مثال: صيانة, إصلاح, تغيير):",
+            value=st.session_state.search_params.get("search_text", ""),
+            key="input_text",
+            placeholder="اتركه فارغاً للبحث في كل النصوص"
+        )
+    
+    with st.expander("⚙ خيارات متقدمة", expanded=False):
+        col_adv1, col_adv2, col_adv3 = st.columns(3)
+        with col_adv1:
+            search_mode = st.radio(
+                "طريقة البحث:",
+                ["بحث جزئي", "مطابقة كاملة"],
+                index=0 if not st.session_state.search_params.get("exact_match") else 1,
+                key="radio_search_mode"
+            )
+        with col_adv2:
+            include_empty = st.checkbox(
+                "تضمين الحقول الفارغة",
+                value=st.session_state.search_params.get("include_empty", True),
+                key="checkbox_include_empty"
+            )
+        with col_adv3:
+            sort_by = st.selectbox(
+                "ترتيب النتائج:",
+                ["رقم الماكينة", "التاريخ", "فني الخدمة"],
+                index=["رقم الماكينة", "التاريخ", "فني الخدمة"].index(
+                    st.session_state.search_params.get("sort_by", "رقم الماكينة")
+                ),
+                key="select_sort_by"
+            )
+    
+    st.markdown("---")
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+    with col_btn1:
+        search_clicked = st.button(
+            "🔍 **بدء البحث**",
+            type="primary",
+            use_container_width=True,
+            key="main_search_btn"
+        )
+    with col_btn2:
+        if st.button("🗑 **مسح الحقول**", use_container_width=True, key="clear_fields"):
+            st.session_state.search_params = {
+                "card_numbers": "",
+                "date_range": "",
+                "tech_names": "",
+                "search_text": "",
+                "exact_match": False,
+                "include_empty": True,
+                "sort_by": "رقم الماكينة"
+            }
+            st.session_state.search_triggered = False
+            st.rerun()
+    with col_btn3:
+        if st.button("📊 **عرض كل البيانات**", use_container_width=True, key="show_all"):
+            st.session_state.search_params = {
+                "card_numbers": "",
+                "date_range": "",
+                "tech_names": "",
+                "search_text": "",
+                "exact_match": False,
+                "include_empty": True,
+                "sort_by": "رقم الماكينة"
+            }
+            st.session_state.search_triggered = True
+            st.rerun()
+    
     if card_numbers != st.session_state.search_params.get("card_numbers", ""):
         st.session_state.search_params["card_numbers"] = card_numbers
     
@@ -1181,255 +1180,143 @@ def check_events_and_corrections(all_sheets):
     st.session_state.search_params["include_empty"] = include_empty
     st.session_state.search_params["sort_by"] = sort_by
     
-    # معالجة البحث
     if search_clicked or st.session_state.search_triggered:
         st.session_state.search_triggered = True
         
-        # جمع معايير البحث
         search_params = st.session_state.search_params.copy()
         
-        # عرض معايير البحث
-        show_search_params(search_params)
+        search_results = perform_search(search_params, all_sheets)
         
-        # تنفيذ البحث
-        show_advanced_search_results(search_params, all_sheets)
-
-def extract_available_techs(all_sheets):
-    """استخراج أسماء فنيي الخدمة المتاحة في البيانات"""
-    techs_set = set()
-    
-    for sheet_name, df in all_sheets.items():
-        if sheet_name == "ServicePlan":
-            continue
+        if search_results is not None and not search_results.empty:
+            display_search_results(search_results, search_params)
             
-        for _, row in df.iterrows():
-            tech = get_servised_by_value(row)
-            if tech != "-":
-                techs_set.add(tech)
-    
-    return sorted(list(techs_set))
-
-def show_search_params(search_params):
-    """عرض معايير البحث المستخدمة"""
-    with st.container():
-        st.markdown("### ⚙ معايير البحث المستخدمة")
-        
-        params_display = []
-        if search_params["card_numbers"]:
-            params_display.append(f"**🔢 أرقام الماكينات:** {search_params['card_numbers']}")
-        if search_params["date_range"]:
-            params_display.append(f"**📅 التواريخ:** {search_params['date_range']}")
-        if search_params["tech_names"]:
-            params_display.append(f"**👨‍🔧 فنيو الخدمة:** {search_params['tech_names']}")
-        if search_params["search_text"]:
-            params_display.append(f"**📝 نص البحث:** {search_params['search_text']}")
-        
-        if params_display:
-            st.info(" | ".join(params_display))
+            add_enhanced_time_analysis_section(search_results)
         else:
-            st.info("🔍 **بحث في كل البيانات**")
+            st.warning("⚠ لم يتم العثور على نتائج تطابق معايير البحث")
 
-def show_advanced_search_results(search_params, all_sheets):
-    """عرض نتائج البحث المتقدم"""
-    st.markdown("### 📊 نتائج البحث")
-    
-    # شريط التقدم
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # البحث في البيانات
+def perform_search(search_params, all_sheets):
+    """تنفيذ البحث"""
     all_results = []
-    total_machines = 0
-    processed_machines = 0
     
-    # حساب إجمالي عدد الماكينات
-    for sheet_name in all_sheets.keys():
-        if sheet_name != "ServicePlan" and sheet_name.startswith("Card"):
-            total_machines += 1
-    
-    # معالجة أرقام الماكينات المطلوبة
-    target_card_numbers = parse_card_numbers(search_params["card_numbers"])
-    
-    # معالجة أسماء الفنيين
-    target_techs = []
-    if search_params["tech_names"]:
-        techs = search_params["tech_names"].split(',')
-        target_techs = [tech.strip().lower() for tech in techs if tech.strip()]
-    
-    # معالجة التواريخ
-    target_dates = []
-    if search_params["date_range"]:
-        dates = search_params["date_range"].split(',')
-        target_dates = [date.strip().lower() for date in dates if date.strip()]
-    
-    # معالجة نص البحث
-    search_terms = []
-    if search_params["search_text"]:
-        terms = search_params["search_text"].split(',')
-        search_terms = [term.strip().lower() for term in terms if term.strip()]
-    
-    # البحث في جميع الشيتات
     for sheet_name in all_sheets.keys():
         if sheet_name == "ServicePlan":
             continue
         
-        # استخراج رقم الماكينة
         card_num_match = re.search(r'Card(\d+)', sheet_name)
         if not card_num_match:
             continue
             
         card_num = int(card_num_match.group(1))
         
-        # التحقق من رقم الماكينة إذا كان هناك تحديد
-        if target_card_numbers and card_num not in target_card_numbers:
-            continue
-        
-        processed_machines += 1
-        if total_machines > 0:
-            progress_bar.progress(processed_machines / total_machines)
-        status_text.text(f"🔍 جاري معالجة الماكينة {card_num}...")
+        if search_params["card_numbers"]:
+            target_numbers = parse_card_numbers(search_params["card_numbers"])
+            if target_numbers and card_num not in target_numbers:
+                continue
         
         df = all_sheets[sheet_name].copy()
         
-        # البحث في الصفوف
         for _, row in df.iterrows():
-            # تطبيق معايير البحث
-            if not check_row_criteria(row, df, card_num, target_techs, target_dates, 
-                                     search_terms, search_params):
+            event_value = "-"
+            correction_value = "-"
+            
+            for col in df.columns:
+                col_normalized = normalize_name(col)
+                if "event" in col_normalized or "الحدث" in col_normalized:
+                    if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+                        event_value = str(row[col]).strip()
+                
+                if "correction" in col_normalized or "تصحيح" in col_normalized:
+                    if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+                        correction_value = str(row[col]).strip()
+            
+            if event_value == "-" and correction_value == "-":
                 continue
             
-            # استخراج البيانات
-            result = extract_row_data(row, df, card_num)
-            if result:
-                all_results.append(result)
+            if search_params["tech_names"]:
+                tech_names = [t.strip().lower() for t in search_params["tech_names"].split(',') if t.strip()]
+                row_tech = get_servised_by_value(row).lower()
+                
+                if row_tech == "-" and not search_params["include_empty"]:
+                    continue
+                
+                tech_match = False
+                if row_tech != "-":
+                    for tech in tech_names:
+                        if search_params["exact_match"]:
+                            if tech == row_tech:
+                                tech_match = True
+                                break
+                        else:
+                            if tech in row_tech:
+                                tech_match = True
+                                break
+                
+                if not tech_match:
+                    continue
+            
+            if search_params["date_range"]:
+                row_date = str(row.get("Date", "")).strip().lower() if pd.notna(row.get("Date")) else ""
+                date_terms = [d.strip().lower() for d in search_params["date_range"].split(',') if d.strip()]
+                
+                if not row_date and not search_params["include_empty"]:
+                    continue
+                
+                date_match = False
+                if row_date:
+                    for date_term in date_terms:
+                        if search_params["exact_match"]:
+                            if date_term == row_date:
+                                date_match = True
+                                break
+                        else:
+                            if date_term in row_date:
+                                date_match = True
+                                break
+                
+                if not date_match:
+                    continue
+            
+            if search_params["search_text"]:
+                search_terms = [t.strip().lower() for t in search_params["search_text"].split(',') if t.strip()]
+                combined_text = f"{event_value.lower()} {correction_value.lower()}"
+                
+                if not event_value and not correction_value and not search_params["include_empty"]:
+                    continue
+                
+                text_match = False
+                for term in search_terms:
+                    if search_params["exact_match"]:
+                        if term == event_value.lower() or term == correction_value.lower():
+                            text_match = True
+                            break
+                    else:
+                        if term in combined_text:
+                            text_match = True
+                            break
+                
+                if not text_match:
+                    continue
+            
+            card_num_value = str(row.get("card", "")).strip() if pd.notna(row.get("card")) else str(card_num)
+            date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
+            tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
+            servised_by_value = get_servised_by_value(row)
+            
+            all_results.append({
+                "Card Number": card_num_value,
+                "Event": event_value,
+                "Correction": correction_value,
+                "Servised by": servised_by_value,
+                "Tones": tones,
+                "Date": date
+            })
     
-    # إخفاء شريط التقدم
-    progress_bar.empty()
-    status_text.empty()
-    
-    # عرض النتائج
     if all_results:
-        display_search_results(all_results, search_params)
-    else:
-        st.warning("⚠ لم يتم العثور على نتائج تطابق معايير البحث")
-        st.info("💡 حاول تعديل معايير البحث أو استخدام مصطلحات أوسع")
-
-def check_row_criteria(row, df, card_num, target_techs, target_dates, 
-                      search_terms, search_params):
-    """التحقق من مطابقة الصف لمعايير البحث"""
-    
-    # 1. التحقق من فني الخدمة
-    if target_techs:
-        row_tech = get_servised_by_value(row).lower()
-        if row_tech == "-" and not search_params["include_empty"]:
-            return False
-        
-        tech_match = False
-        if row_tech != "-":
-            for tech in target_techs:
-                if search_params["exact_match"]:
-                    if tech == row_tech:
-                        tech_match = True
-                        break
-                else:
-                    if tech in row_tech:
-                        tech_match = True
-                        break
-        
-        if not tech_match:
-            return False
-    
-    # 2. التحقق من التاريخ
-    if target_dates:
-        row_date = str(row.get("Date", "")).strip().lower() if pd.notna(row.get("Date")) else ""
-        if not row_date and not search_params["include_empty"]:
-            return False
-        
-        date_match = False
-        if row_date:
-            for date_term in target_dates:
-                if search_params["exact_match"]:
-                    if date_term == row_date:
-                        date_match = True
-                        break
-                else:
-                    if date_term in row_date:
-                        date_match = True
-                        break
-        
-        if not date_match:
-            return False
-    
-    # 3. التحقق من نص البحث
-    if search_terms:
-        row_event, row_correction = extract_event_correction(row, df)
-        row_event_lower = row_event.lower()
-        row_correction_lower = row_correction.lower()
-        
-        if not row_event and not row_correction and not search_params["include_empty"]:
-            return False
-        
-        text_match = False
-        combined_text = f"{row_event_lower} {row_correction_lower}"
-        
-        for term in search_terms:
-            if search_params["exact_match"]:
-                if term == row_event_lower or term == row_correction_lower:
-                    text_match = True
-                    break
-            else:
-                if term in combined_text:
-                    text_match = True
-                    break
-        
-        if not text_match:
-            return False
-    
-    return True
-
-def extract_event_correction(row, df):
-    """استخراج الحدث والتصحيح من الصف"""
-    event_value = "-"
-    correction_value = "-"
-    
-    for col in df.columns:
-        col_normalized = normalize_name(col)
-        if "event" in col_normalized or "الحدث" in col_normalized:
-            if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
-                event_value = str(row[col]).strip()
-        
-        if "correction" in col_normalized or "تصحيح" in col_normalized:
-            if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
-                correction_value = str(row[col]).strip()
-    
-    return event_value, correction_value
-
-def extract_row_data(row, df, card_num):
-    """استخراج بيانات الصف"""
-    card_num_value = str(row.get("card", "")).strip() if pd.notna(row.get("card")) else str(card_num)
-    date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
-    tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
-    
-    event_value, correction_value = extract_event_correction(row, df)
-    
-    # إذا كانت كل الحقول فارغة، نتجاهل الصف
-    if (event_value == "-" and correction_value == "-" and 
-        date == "-" and tones == "-"):
-        return None
-    
-    servised_by_value = get_servised_by_value(row)
-    
-    return {
-        "Card Number": card_num_value,
-        "Event": event_value,
-        "Correction": correction_value,
-        "Servised by": servised_by_value,
-        "Tones": tones,
-        "Date": date
-    }
+        return pd.DataFrame(all_results)
+    return pd.DataFrame()
 
 def parse_card_numbers(card_numbers_str):
-    """تحليل سلسلة أرقام الماكينات إلى قائمة أرقام"""
+    """تحليل أرقام الماكينات"""
     if not card_numbers_str:
         return set()
     
@@ -1459,47 +1346,29 @@ def parse_card_numbers(card_numbers_str):
     return numbers
 
 def display_search_results(results, search_params):
-    """عرض نتائج البحث بشكل احترافي مع ترتيب متسلسل"""
-    # تحويل النتائج إلى DataFrame
-    if not results:
+    """عرض نتائج البحث"""
+    if results.empty:
         st.warning("⚠ لا توجد نتائج لعرضها")
         return
     
-    result_df = pd.DataFrame(results)
+    display_df = results.copy()
     
-    # التأكد من وجود البيانات
-    if result_df.empty:
-        st.warning("⚠ لا توجد بيانات لعرضها")
-        return
-    
-    # إنشاء نسخة للعرض مع معالجة الترتيب
-    display_df = result_df.copy()
-    
-    # تحويل رقم الماكينة إلى رقم صحيح للترتيب (بشكل آمن)
     display_df['Card_Number_Clean'] = pd.to_numeric(display_df['Card Number'], errors='coerce')
-    
-    # تحويل التواريخ لترتيب زمني (بشكل آمن)
     display_df['Date_Clean'] = pd.to_datetime(display_df['Date'], errors='coerce', dayfirst=True)
     
-    # ترتيب النتائج حسب رقم الماكينة ثم التاريخ
     if search_params["sort_by"] == "التاريخ":
         display_df = display_df.sort_values(by=['Date_Clean', 'Card_Number_Clean'], 
                                           ascending=[False, True], na_position='last')
     elif search_params["sort_by"] == "فني الخدمة":
         display_df = display_df.sort_values(by=['Servised by', 'Card_Number_Clean', 'Date_Clean'], 
                                           ascending=[True, True, False], na_position='last')
-    else:  # رقم الماكينة (الافتراضي)
+    else:
         display_df = display_df.sort_values(by=['Card_Number_Clean', 'Date_Clean'], 
                                           ascending=[True, False], na_position='last')
     
-    # إضافة ترتيب الأحداث لكل ماكينة
-    display_df['Event_Order'] = display_df.groupby('Card Number').cumcount() + 1
-    display_df['Total_Events'] = display_df.groupby('Card Number')['Card Number'].transform('count')
-    
-    # عرض الإحصائيات
     st.markdown("### 📈 إحصائيات النتائج")
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric("📋 عدد النتائج", len(display_df))
@@ -1509,192 +1378,507 @@ def display_search_results(results, search_params):
         st.metric("🔢 عدد الماكينات", unique_machines)
     
     with col3:
-        # عدد الماكينات التي لديها أكثر من حدث
-        if not display_df.empty:
-            machine_counts = display_df.groupby('Card Number').size()
-            multi_event_machines = (machine_counts > 1).sum()
-            st.metric("🔢 مكن متعددة الأحداث", multi_event_machines)
-        else:
-            st.metric("🔢 مكن متعددة الأحداث", 0)
-    
-    with col4:
         if 'Correction' in display_df.columns:
             with_correction = display_df[display_df["Correction"] != "-"].shape[0]
             st.metric("✏ تحتوي على تصحيح", with_correction)
         else:
             st.metric("✏ تحتوي على تصحيح", 0)
     
-    # عرض النتائج بشكل متسلسل
-    st.markdown("### 📋 النتائج التفصيلية (مرتبة)")
+    st.markdown("### 📋 النتائج التفصيلية")
     
-    # فلترة النتائج
-    st.markdown("#### 🔍 فلترة النتائج")
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    columns_to_show = ['Card Number', 'Event', 'Correction', 'Servised by', 'Tones', 'Date']
+    columns_to_show = [col for col in columns_to_show if col in display_df.columns]
     
-    with filter_col1:
-        show_with_event = st.checkbox("📝 مع حدث", True, key="filter_event")
-    with filter_col2:
-        show_with_correction = st.checkbox("✏ مع تصحيح", True, key="filter_correction")
-    with filter_col3:
-        show_with_tech = st.checkbox("👨‍🔧 مع فني خدمة", True, key="filter_tech")
-    
-    # تطبيق الفلاتر
-    filtered_df = display_df.copy()
-    
-    if not show_with_event and 'Event' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["Event"] != "-"]
-    if not show_with_correction and 'Correction' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["Correction"] != "-"]
-    if not show_with_tech and 'Servised by' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["Servised by"] != "-"]
-    
-    # عرض النتائج
-    if not filtered_df.empty:
-        # استخدام تبويبات لعرض النتائج بطريقتين
-        display_tabs = st.tabs(["📊 عرض جدولي", "📋 عرض تفصيلي حسب الماكينة"])
+    # تطبيق تلوين للجدول
+    def color_events_corrections_row(row):
+        event = row.get('Event', '-')
+        correction = row.get('Correction', '-')
         
-        with display_tabs[0]:
-            # العرض الجدولي التقليدي
-            # تحديد الأعمدة المراد عرضها
-            columns_to_show = ['Card Number', 'Event', 'Correction', 'Servised by', 'Tones', 'Date', 'Event_Order', 'Total_Events']
-            columns_to_show = [col for col in columns_to_show if col in filtered_df.columns]
-            
-            st.dataframe(
-                filtered_df[columns_to_show].style.apply(style_table, axis=1),
-                use_container_width=True,
-                height=500
-            )
-        
-        with display_tabs[1]:
-            # عرض تفصيلي لكل ماكينة بشكل منفصل
-            # تجميع الماكينات الفريدة
-            unique_machines = sorted(filtered_df['Card Number'].unique(), 
-                                   key=lambda x: pd.to_numeric(x, errors='coerce') if str(x).isdigit() else float('inf'))
-            
-            for machine in unique_machines:
-                machine_data = filtered_df[filtered_df['Card Number'] == machine].copy()
-                machine_data = machine_data.sort_values('Event_Order')
-                
-                with st.expander(f"🔧 الماكينة {machine} - عدد الأحداث: {len(machine_data)}", expanded=len(unique_machines) <= 5):
-                    
-                    # عرض إحصائيات الماكينة
-                    col_stats1, col_stats2, col_stats3 = st.columns(3)
-                    with col_stats1:
-                        if not machine_data.empty and 'Date' in machine_data.columns:
-                            st.metric("📅 أول حدث", machine_data['Date'].iloc[0] if machine_data['Date'].iloc[0] != "-" else "غير محدد")
-                        else:
-                            st.metric("📅 أول حدث", "-")
-                    with col_stats2:
-                        if not machine_data.empty and 'Date' in machine_data.columns:
-                            st.metric("📅 آخر حدث", machine_data['Date'].iloc[-1] if machine_data['Date'].iloc[-1] != "-" else "غير محدد")
-                        else:
-                            st.metric("📅 آخر حدث", "-")
-                    with col_stats3:
-                        if not machine_data.empty and 'Servised by' in machine_data.columns:
-                            tech_count = machine_data['Servised by'].nunique()
-                            st.metric("👨‍🔧 فنيين مختلفين", tech_count)
-                        else:
-                            st.metric("👨‍🔧 فنيين مختلفين", 0)
-                    
-                    # عرض أحداث الماكينة
-                    for idx, row in machine_data.iterrows():
-                        st.markdown("---")
-                        col_event1, col_event2 = st.columns([3, 2])
-                        
-                        with col_event1:
-                            event_order = row.get('Event_Order', '?')
-                            total_events = row.get('Total_Events', '?')
-                            st.markdown(f"**الحدث #{event_order} من {total_events}**")
-                            if 'Date' in row:
-                                st.markdown(f"**📅 التاريخ:** {row['Date']}")
-                            if 'Event' in row and row['Event'] != '-':
-                                st.markdown(f"**📝 الحدث:** {row['Event']}")
-                            if 'Correction' in row and row['Correction'] != '-':
-                                st.markdown(f"**✏ التصحيح:** {row['Correction']}")
-                        
-                        with col_event2:
-                            if 'Servised by' in row and row['Servised by'] != '-':
-                                st.markdown(f"**👨‍🔧 فني الخدمة:** {row['Servised by']}")
-                            if 'Tones' in row and row['Tones'] != '-':
-                                st.markdown(f"**⚖️ الأطنان:** {row['Tones']}")
-    else:
-        st.warning("⚠ لم يتم العثور على نتائج تطابق معايير الفلترة")
+        if event != '-' and correction != '-':
+            return [f"background-color: {COLOR_CONFIG['service_done']}"] * len(row)
+        elif event != '-' and correction == '-':
+            return [f"background-color: {COLOR_CONFIG['service_partial']}"] * len(row)
+        else:
+            if row.name % 2 == 0:
+                return [f"background-color: {COLOR_CONFIG['even_row']}"] * len(row)
+            else:
+                return [f"background-color: {COLOR_CONFIG['odd_row']}"] * len(row)
     
-    # خيارات التصدير
+    styled_display_df = display_df[columns_to_show].style.apply(color_events_corrections_row, axis=1)
+    
+    st.dataframe(
+        styled_display_df,
+        use_container_width=True,
+        height=500
+    )
+    
     st.markdown("---")
     st.markdown("### 💾 خيارات التصدير")
     
-    export_col1, export_col2 = st.columns(2)
-    
-    with export_col1:
-        # تصدير Excel - استخدام البيانات الأصلية وترتيبها بشكل صحيح
-        if not result_df.empty:
-            buffer_excel = io.BytesIO()
-            
-            # إنشاء نسخة للتصدير مع ترتيب صحيح
-            export_df = result_df.copy()
-            
-            # إضافة أعمدة التنظيف للترتيب
-            export_df['Card_Number_Clean_Export'] = pd.to_numeric(export_df['Card Number'], errors='coerce')
-            export_df['Date_Clean_Export'] = pd.to_datetime(export_df['Date'], errors='coerce', dayfirst=True)
-            
-            # ترتيب البيانات
-            export_df = export_df.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], 
-                                             ascending=[True, False], na_position='last')
-            
-            # إزالة الأعمدة المؤقتة
-            export_df = export_df.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
-            
-            # حفظ الملف
-            export_df.to_excel(buffer_excel, index=False, engine="openpyxl")
-            
-            st.download_button(
-                label="📊 حفظ كملف Excel",
-                data=buffer_excel.getvalue(),
-                file_name=f"بحث_أحداث_مرتب_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-        else:
-            st.info("⚠ لا توجد بيانات للتصدير")
-    
-    with export_col2:
-        # تصدير CSV
-        if not result_df.empty:
-            buffer_csv = io.BytesIO()
-            
-            # إنشاء نسخة للتصدير مع ترتيب صحيح
-            export_csv = result_df.copy()
-            
-            # إضافة أعمدة التنظيف للترتيب
-            export_csv['Card_Number_Clean_Export'] = pd.to_numeric(export_csv['Card Number'], errors='coerce')
-            export_csv['Date_Clean_Export'] = pd.to_datetime(export_csv['Date'], errors='coerce', dayfirst=True)
-            
-            # ترتيب البيانات
-            export_csv = export_csv.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], 
-                                               ascending=[True, False], na_position='last')
-            
-            # إزالة الأعمدة المؤقتة
-            export_csv = export_csv.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
-            
-            # حفظ الملف
-            export_csv.to_csv(buffer_csv, index=False, encoding='utf-8-sig')
-            
-            st.download_button(
-                label="📄 حفظ كملف CSV",
-                data=buffer_csv.getvalue(),
-                file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        else:
-            st.info("⚠ لا توجد بيانات للتصدير")
+    if not results.empty:
+        buffer_excel = io.BytesIO()
+        results.to_excel(buffer_excel, index=False, engine="openpyxl")
+        
+        st.download_button(
+            label="📊 حفظ كملف Excel",
+            data=buffer_excel.getvalue(),
+            file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
-# -------------------------------
-# 🖥 دالة إضافة إيفينت جديد - في الشيت المنفصل
-# -------------------------------
+def add_enhanced_time_analysis_section(results_df):
+    """إضافة قسم التحليل الزمني المحسن"""
+    st.markdown("---")
+    st.markdown("## ⏱️ التحليل الزمني المحسن للأحداث")
+    
+    st.markdown("#### 🔍 تحليل الفترات الزمنية بين الأحداث")
+    
+    event_keyword = st.text_input(
+        "الكلمة المطلوبة (مثال: سير، محرك، صيانة):",
+        placeholder="أدخل كلمة أو جزء من الحدث للتحليل الزمني",
+        key="enhanced_time_analysis_keyword"
+    )
+    
+    if event_keyword and st.button("🔬 تحليل الفترات الزمنية", type="primary", key="enhanced_analysis_btn"):
+        with st.spinner("🔄 جاري تحليل الفترات الزمنية..."):
+            analysis_result = analyze_event_time_intervals_enhanced(results_df, event_keyword)
+            
+            if analysis_result:
+                display_enhanced_time_analysis(analysis_result)
+            else:
+                st.warning(f"⚠ لم يتم العثور على أحداث تحتوي على '{event_keyword}' أو لا يمكن تحليل الفترات الزمنية.")
+
+def display_enhanced_time_analysis(analysis_result):
+    """عرض التحليل الزمني المحسن"""
+    if not analysis_result:
+        return
+    
+    event_keyword = analysis_result['event_keyword']
+    machine_analysis = analysis_result['machine_analysis']
+    general_stats = analysis_result['general_stats']
+    
+    st.markdown(f"### ⏱️ التحليل الزمني لكلمة: **{event_keyword}**")
+    
+    if general_stats:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("🔄 إجمالي الأحداث", general_stats['إجمالي الأحداث'])
+        
+        with col2:
+            st.metric("🔢 عدد الماكينات", general_stats['عدد الماكينات'])
+        
+        with col3:
+            st.metric("📊 متوسط الأيام", f"{general_stats['المتوسط العام (يوم)']}")
+        
+        with col4:
+            st.metric("📈 إجمالي الفترات", general_stats['إجمالي الفترات'])
+    
+    st.markdown("---")
+    
+    if general_stats:
+        st.markdown("#### 📊 الإحصائيات العامة")
+        
+        stats_data = []
+        for key, value in general_stats.items():
+            if key not in ['إجمالي الأحداث', 'عدد الماكينات', 'إجمالي الفترات']:
+                stats_data.append({'المقياس': key, 'القيمة': value})
+        
+        stats_df = pd.DataFrame(stats_data)
+        st.dataframe(stats_df, use_container_width=True)
+    
+    if machine_analysis:
+        st.markdown("#### 🏭 التحليل حسب الماكينة")
+        
+        machine_stats_data = []
+        for machine, stats in machine_analysis.items():
+            machine_stats_data.append({
+                'الماكينة': machine,
+                'عدد الأحداث': stats['عدد الأحداث'],
+                'عدد الفترات': stats['عدد الفترات'],
+                'أقصر فترة': stats['أقصر فترة (يوم)'],
+                'أطول فترة': stats['أطول فترة (يوم)'],
+                'المتوسط': stats['متوسط الفترة (يوم)'],
+                'الوسيط': stats['الوسيط (يوم)']
+            })
+        
+        machine_stats_df = pd.DataFrame(machine_stats_data)
+        
+        st.dataframe(
+            machine_stats_df.sort_values('الماكينة'),
+            use_container_width=True,
+            height=300
+        )
+        
+        st.markdown("##### 🔍 عرض تفاصيل ماكينة محددة")
+        selected_machine = st.selectbox(
+            "اختر الماكينة:",
+            options=list(machine_analysis.keys()),
+            key="select_machine_for_details"
+        )
+        
+        if selected_machine:
+            machine_stats = machine_analysis[selected_machine]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("🔢 عدد الأحداث", machine_stats['عدد الأحداث'])
+            with col2:
+                st.metric("📈 عدد الفترات", machine_stats['عدد الفترات'])
+            with col3:
+                st.metric("📊 متوسط الأيام", machine_stats['متوسط الفترة (يوم)'])
+            with col4:
+                st.metric("⚖️ الوسيط", machine_stats['الوسيط (يوم)'])
+            
+            if machine_stats['الفترات']:
+                st.markdown("##### 📋 الفترات الزمنية التفصيلية")
+                
+                machine_intervals_df = pd.DataFrame(machine_stats['الفترات'])
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    min_days = st.number_input("الحد الأدنى للأيام:", min_value=0, value=0, step=1, 
+                                               key=f"min_days_{selected_machine}")
+                with col2:
+                    max_days = st.number_input("الحد الأقصى للأيام:", min_value=min_days, value=365, step=1,
+                                               key=f"max_days_{selected_machine}")
+                
+                filtered_intervals = machine_intervals_df[
+                    (machine_intervals_df['الأيام بينهما'] >= min_days) & 
+                    (machine_intervals_df['الأيام بينهما'] <= max_days)
+                ]
+                
+                st.dataframe(
+                    filtered_intervals,
+                    use_container_width=True,
+                    height=400
+                )
+                
+                st.markdown("---")
+                buffer = io.BytesIO()
+                filtered_intervals.to_excel(buffer, index=False, engine='openpyxl')
+                
+                st.download_button(
+                    label=f"📊 حفظ فترات الماكينة {selected_machine}",
+                    data=buffer.getvalue(),
+                    file_name=f"فترات_ماكينة_{selected_machine}_{event_keyword}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+    
+    if analysis_result['all_intervals']:
+        st.markdown("#### 📋 جميع الفترات الزمنية")
+        
+        all_intervals_df = pd.DataFrame(analysis_result['all_intervals'])
+        
+        st.markdown("##### 🔍 فلترة عامة")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            global_min_days = st.number_input("الحد الأدنى للأيام:", min_value=0, value=0, step=1, key="global_min_days")
+        with col2:
+            global_max_days = st.number_input("الحد الأقصى للأيام:", min_value=global_min_days, value=365, step=1, key="global_max_days")
+        with col3:
+            sort_by = st.selectbox("ترتيب حسب:", ["الماكينة", "الأيام بينهما"], key="global_sort")
+        
+        filtered_all = all_intervals_df[
+            (all_intervals_df['الأيام بينهما'] >= global_min_days) & 
+            (all_intervals_df['الأيام بينهما'] <= global_max_days)
+        ]
+        
+        if sort_by == "الأيام بينهما":
+            filtered_all = filtered_all.sort_values('الأيام بينهما')
+        else:
+            filtered_all = filtered_all.sort_values('الماكينة')
+        
+        st.dataframe(
+            filtered_all,
+            use_container_width=True,
+            height=400
+        )
+        
+        st.markdown("---")
+        buffer_all = io.BytesIO()
+        filtered_all.to_excel(buffer_all, index=False, engine='openpyxl')
+        
+        st.download_button(
+            label="📊 حفظ كل الفترات",
+            data=buffer_all.getvalue(),
+            file_name=f"كل_الفترات_{event_keyword}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+# ===============================
+# 🛠 إدارة وتعديل البيانات مع تلوين وإضافة/حذف صفوف (من الكود الأول)
+# ===============================
+def edit_sheet_with_save_button(sheets_edit):
+    """تعديل بيانات الشيت مع إضافة/حذف صفوف وتلوين"""
+    st.subheader("✏ تعديل البيانات")
+    
+    if "original_sheets" not in st.session_state:
+        st.session_state.original_sheets = sheets_edit.copy()
+    
+    if "unsaved_changes" not in st.session_state:
+        st.session_state.unsaved_changes = {}
+    
+    if "added_rows" not in st.session_state:
+        st.session_state.added_rows = {}
+    
+    if "deleted_rows" not in st.session_state:
+        st.session_state.deleted_rows = {}
+    
+    if "modified_rows" not in st.session_state:
+        st.session_state.modified_rows = {}
+    
+    sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
+    
+    if sheet_name not in st.session_state.unsaved_changes:
+        st.session_state.unsaved_changes[sheet_name] = False
+    
+    df = sheets_edit[sheet_name].astype(str).copy()
+    
+    st.markdown(f"### 📋 تحرير شيت: {sheet_name}")
+    st.info(f"عدد الصفوف: {len(df)} | عدد الأعمدة: {len(df.columns)}")
+    
+    # عرض الصفوف المضاف حديثاً ضمن الرنج المناسب
+    if sheet_name in st.session_state.added_rows and st.session_state.added_rows[sheet_name]:
+        st.markdown("#### ➕ الصفوف المضاف حديثاً")
+        added_rows_list = st.session_state.added_rows[sheet_name]
+        
+        if added_rows_list:
+            added_df = df.iloc[added_rows_list].copy()
+            
+            # إضافة عمود للإشارة إلى أن الصف مضاف
+            added_df.insert(0, "💡 الحالة", ["مضاف حديثاً"] * len(added_df))
+            
+            # تلوين الصفوف المضاف
+            def color_added_row(row):
+                return [f"background-color: {COLOR_CONFIG['row_added']}"] * len(row)
+            
+            styled_added_df = added_df.style.apply(color_added_row, axis=1)
+            
+            st.dataframe(
+                styled_added_df,
+                use_container_width=True,
+                height=200
+            )
+    
+    # محرر البيانات مع إضافة وحذف ديناميكي للصفوف
+    st.markdown("#### 🛠 محرر البيانات الديناميكي")
+    
+    # أزرار للتحكم بالصفوف
+    col_buttons1, col_buttons2, col_buttons3 = st.columns(3)
+    
+    with col_buttons1:
+        if st.button("➕ إضافة صف جديد في النهاية", key=f"add_row_{sheet_name}"):
+            new_row = pd.Series({col: "" for col in df.columns})
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            st.session_state.unsaved_changes[sheet_name] = True
+            
+            # تسجيل الصف المضاف
+            if sheet_name not in st.session_state.added_rows:
+                st.session_state.added_rows[sheet_name] = []
+            st.session_state.added_rows[sheet_name].append(len(df) - 1)
+            
+            st.success("✅ تم إضافة صف جديد. سيظهر بعد حفظ التغييرات.")
+    
+    with col_buttons2:
+        if st.button("🗑 حذف الصف المحدد", key=f"delete_selected_{sheet_name}"):
+            if "selected_rows" in st.session_state and st.session_state.selected_rows:
+                rows_to_delete = sorted(st.session_state.selected_rows, reverse=True)
+                
+                if sheet_name not in st.session_state.deleted_rows:
+                    st.session_state.deleted_rows[sheet_name] = []
+                
+                for row_idx in rows_to_delete:
+                    if 0 <= row_idx < len(df):
+                        # تسجيل الصف المحذوف
+                        st.session_state.deleted_rows[sheet_name].append(row_idx)
+                        
+                        # إزالة الصف من المضاف إن كان مضافاً
+                        if sheet_name in st.session_state.added_rows:
+                            if row_idx in st.session_state.added_rows[sheet_name]:
+                                st.session_state.added_rows[sheet_name].remove(row_idx)
+                        
+                        df = df.drop(row_idx).reset_index(drop=True)
+                
+                st.session_state.unsaved_changes[sheet_name] = True
+                st.success(f"✅ تم حذف {len(rows_to_delete)} صفوف.")
+                st.session_state.selected_rows = []
+            else:
+                st.warning("⚠ الرجاء تحديد الصفوف أولاً باستخدام زر التحديد في الجدول.")
+    
+    with col_buttons3:
+        if st.button("🔄 استعادة الصفوف المحذوفة", key=f"restore_deleted_{sheet_name}"):
+            if sheet_name in st.session_state.deleted_rows and st.session_state.deleted_rows[sheet_name]:
+                st.info(f"📋 هناك {len(st.session_state.deleted_rows[sheet_name])} صفوف محذوفة.")
+                
+                if st.checkbox("تأكيد استعادة جميع الصفوف المحذوفة"):
+                    st.session_state.deleted_rows[sheet_name] = []
+                    st.success("✅ تم استعادة الصفوف المحذوفة.")
+                    st.session_state.unsaved_changes[sheet_name] = True
+    
+    st.markdown("---")
+    
+    # محرر البيانات
+    edited_df = st.data_editor(
+        df, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        key=f"editor_{sheet_name}",
+        column_config={
+            "_index": st.column_config.NumberColumn(
+                "رقم الصف",
+                help="رقم الصف في الجدول",
+                width="small"
+            )
+        }
+    )
+    
+    # التحقق من وجود تغييرات
+    has_changes = not edited_df.equals(df)
+    
+    # اكتشاف الصفوف المعدلة
+    if not has_changes and len(edited_df) == len(df):
+        for idx in range(len(df)):
+            if not df.iloc[idx].equals(edited_df.iloc[idx]):
+                has_changes = True
+                if sheet_name not in st.session_state.modified_rows:
+                    st.session_state.modified_rows[sheet_name] = []
+                if idx not in st.session_state.modified_rows[sheet_name]:
+                    st.session_state.modified_rows[sheet_name].append(idx)
+    
+    if has_changes:
+        st.session_state.unsaved_changes[sheet_name] = True
+        
+        st.warning("⚠ لديك تغييرات غير محفوظة!")
+        
+        # حساب التغييرات
+        changes_summary = calculate_changes_summary(df, edited_df, sheet_name)
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("💾 حفظ التغييرات", key=f"save_{sheet_name}", type="primary"):
+                sheets_edit[sheet_name] = edited_df.astype(object)
+                
+                new_sheets = auto_save_to_github(
+                    sheets_edit,
+                    f"تعديل يدوي في شيت {sheet_name} - {changes_summary}"
+                )
+                
+                if new_sheets is not None:
+                    sheets_edit = new_sheets
+                    
+                    # تحديث البيانات بعد الحفظ
+                    st.session_state.original_sheets[sheet_name] = edited_df.copy()
+                    st.session_state.unsaved_changes[sheet_name] = False
+                    
+                    # مسح سجلات الصفوف المضاف/محذوف بعد الحفظ الناجح
+                    if sheet_name in st.session_state.added_rows:
+                        st.session_state.added_rows[sheet_name] = []
+                    if sheet_name in st.session_state.deleted_rows:
+                        st.session_state.deleted_rows[sheet_name] = []
+                    if sheet_name in st.session_state.modified_rows:
+                        st.session_state.modified_rows[sheet_name] = []
+                    
+                    st.success(f"✅ تم حفظ التغييرات في شيت {sheet_name} بنجاح!")
+                    
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ فشل حفظ التغييرات!")
+        
+        with col2:
+            if st.button("↩️ تراجع عن التغييرات", key=f"undo_{sheet_name}"):
+                if sheet_name in st.session_state.original_sheets:
+                    sheets_edit[sheet_name] = st.session_state.original_sheets[sheet_name].astype(object)
+                    
+                    # مسح سجلات التغييرات
+                    st.session_state.unsaved_changes[sheet_name] = False
+                    if sheet_name in st.session_state.added_rows:
+                        st.session_state.added_rows[sheet_name] = []
+                    if sheet_name in st.session_state.deleted_rows:
+                        st.session_state.deleted_rows[sheet_name] = []
+                    if sheet_name in st.session_state.modified_rows:
+                        st.session_state.modified_rows[sheet_name] = []
+                    
+                    st.info(f"↩️ تم التراجع عن التغييرات في شيت {sheet_name}")
+                    st.rerun()
+                else:
+                    st.warning("⚠ لا توجد بيانات أصلية للتراجع!")
+        
+        with col3:
+            with st.expander("📊 ملخص التغييرات", expanded=True):
+                st.write(f"**🔄 تغييرات في شيت:** {sheet_name}")
+                st.write(f"**➕ صفوف مضافة:** {changes_summary.get('added', 0)}")
+                st.write(f"**🗑️ صفوف محذوفة:** {changes_summary.get('deleted', 0)}")
+                st.write(f"**✏️ صفوف معدلة:** {changes_summary.get('modified', 0)}")
+                st.write(f"**🔢 إجمالي التغييرات:** {changes_summary.get('total', 0)}")
+                
+                if changes_summary.get('added', 0) > 0:
+                    st.info("💡 **ملاحظة:** الصفوف المضاف حديثاً سوف تظهر في عرض البيانات ضمن الرنج المناسب بعد الحفظ.")
+    else:
+        if st.session_state.unsaved_changes.get(sheet_name, False):
+            st.info("ℹ️ التغييرات السابقة تم حفظها.")
+            st.session_state.unsaved_changes[sheet_name] = False
+        
+        if st.button("🔄 تحديث البيانات", key=f"refresh_{sheet_name}"):
+            st.rerun()
+    
+    return sheets_edit
+
+def calculate_changes_summary(original_df, edited_df, sheet_name):
+    """حساب ملخص التغييرات"""
+    summary = {
+        "added": 0,
+        "deleted": 0,
+        "modified": 0,
+        "total": 0
+    }
+    
+    # حساب الصفوف المضافة والمحذوفة
+    if len(edited_df) > len(original_df):
+        summary["added"] = len(edited_df) - len(original_df)
+    elif len(edited_df) < len(original_df):
+        summary["deleted"] = len(original_df) - len(edited_df)
+    
+    # حساب الصفوف المعدلة
+    if sheet_name in st.session_state.modified_rows:
+        summary["modified"] = len(st.session_state.modified_rows[sheet_name])
+    
+    # حساب إجمالي التغييرات
+    summary["total"] = summary["added"] + summary["deleted"] + summary["modified"]
+    
+    # إنشاء نص وصفي
+    changes_text = ""
+    if summary["added"] > 0:
+        changes_text += f"أضيف {summary['added']} صف"
+        if summary["added"] > 1:
+            changes_text += "وف"
+    
+    if summary["deleted"] > 0:
+        if changes_text:
+            changes_text += "، "
+        changes_text += f"حذف {summary['deleted']} صف"
+        if summary["deleted"] > 1:
+            changes_text += "وف"
+    
+    if summary["modified"] > 0:
+        if changes_text:
+            changes_text += "، "
+        changes_text += f"عدل {summary['modified']} صف"
+        if summary["modified"] > 1:
+            changes_text += "وف"
+    
+    if not changes_text:
+        changes_text = "لا توجد تغييرات"
+    
+    summary["text"] = changes_text
+    return summary
+
 def add_new_event(sheets_edit):
-    """إضافة إيفينت جديد في شيت منفصل"""
+    """إضافة حدث جديد"""
     st.subheader("➕ إضافة حدث جديد")
     
     sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="add_event_sheet")
@@ -1712,20 +1896,31 @@ def add_new_event(sheets_edit):
     
     event_date = st.text_input("التاريخ (مثال: 20\\5\\2025):", key="new_event_date")
     
+    # تحديد الرنج المناسب إذا أمكن
+    if "Min_Tones" in df.columns and "Max_Tones" in df.columns:
+        st.markdown("### 🎯 تحديد الرنج المناسب")
+        
+        col_range1, col_range2 = st.columns(2)
+        with col_range1:
+            min_tones = st.number_input("الحد الأدنى للطن:", min_value=0, value=0, step=100, key="new_min_tones")
+        with col_range2:
+            max_tones = st.number_input("الحد الأقصى للطن:", min_value=min_tones, value=1000, step=100, key="new_max_tones")
+    
     if st.button("💾 إضافة الحدث الجديد", key="add_new_event_btn"):
         if not card_num.strip():
             st.warning("⚠ الرجاء إدخال رقم الماكينة.")
             return
         
-        # إنشاء صف جديد
         new_row = {}
-        
-        # إضافة البيانات الأساسية للأحداث
         new_row["card"] = card_num.strip()
         if event_date.strip():
             new_row["Date"] = event_date.strip()
         
-        # إضافة بيانات الإيفينت والكوريكشن
+        # إضافة بيانات الرنج إذا تم تحديدها
+        if "min_tones" in locals() and "max_tones" in locals():
+            new_row["Min_Tones"] = str(min_tones)
+            new_row["Max_Tones"] = str(max_tones)
+        
         event_columns = [col for col in df.columns if normalize_name(col) in ["event", "events", "الحدث", "الأحداث"]]
         if event_columns and event_text.strip():
             new_row[event_columns[0]] = event_text.strip()
@@ -1738,7 +1933,6 @@ def add_new_event(sheets_edit):
         elif not correction_columns and correction_text.strip():
             new_row["Correction"] = correction_text.strip()
         
-        # البحث عن عمود Servised by
         servised_col = None
         servised_columns = [col for col in df.columns if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]]
         if servised_columns:
@@ -1754,13 +1948,11 @@ def add_new_event(sheets_edit):
         if serviced_by.strip():
             new_row[servised_col] = serviced_by.strip()
         
-        # إضافة الصف الجديد
         new_row_df = pd.DataFrame([new_row]).astype(str)
         df_new = pd.concat([df, new_row_df], ignore_index=True)
         
         sheets_edit[sheet_name] = df_new.astype(object)
         
-        # حفظ تلقائي في GitHub
         new_sheets = auto_save_to_github(
             sheets_edit,
             f"إضافة حدث جديد في {sheet_name}"
@@ -1770,9 +1962,6 @@ def add_new_event(sheets_edit):
             st.success("✅ تم إضافة الحدث الجديد بنجاح!")
             st.rerun()
 
-# -------------------------------
-# 🖥 دالة تعديل الإيفينت والكوريكشن
-# -------------------------------
 def edit_events_and_corrections(sheets_edit):
     """تعديل الإيفينت والكوريكشن"""
     st.subheader("✏ تعديل الحدث والتصحيح")
@@ -1780,10 +1969,8 @@ def edit_events_and_corrections(sheets_edit):
     sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_events_sheet")
     df = sheets_edit[sheet_name].astype(str)
     
-    # عرض البيانات الحالية
     st.markdown("### 📋 البيانات الحالية (الحدث والتصحيح)")
     
-    # استخراج الأعمدة المطلوبة
     display_columns = ["card", "Date"]
     
     event_columns = [col for col in df.columns if normalize_name(col) in ["event", "events", "الحدث", "الأحداث"]]
@@ -1798,11 +1985,27 @@ def edit_events_and_corrections(sheets_edit):
     if servised_columns:
         display_columns.append(servised_columns[0])
     
-    # عرض البيانات
     display_df = df[display_columns].copy()
-    st.dataframe(display_df, use_container_width=True)
     
-    # اختيار الصف للتعديل
+    # تطبيق تلوين على الجدول
+    def color_events_display(row):
+        event_val = row.get(event_columns[0] if event_columns else "", "-")
+        correction_val = row.get(correction_columns[0] if correction_columns else "", "-")
+        
+        if event_val != "-" and correction_val != "-":
+            return [f"background-color: {COLOR_CONFIG['service_done']}"] * len(row)
+        elif event_val != "-" and correction_val == "-":
+            return [f"background-color: {COLOR_CONFIG['service_partial']}"] * len(row)
+        else:
+            if row.name % 2 == 0:
+                return [f"background-color: {COLOR_CONFIG['even_row']}"] * len(row)
+            else:
+                return [f"background-color: {COLOR_CONFIG['odd_row']}"] * len(row)
+    
+    styled_display_df = display_df.style.apply(color_events_display, axis=1)
+    
+    st.dataframe(styled_display_df, use_container_width=True)
+    
     st.markdown("### ✏ اختر الصف للتعديل")
     row_index = st.number_input("رقم الصف (ابدأ من 0):", min_value=0, max_value=len(df)-1, step=1, key="edit_row_index")
     
@@ -1822,7 +2025,6 @@ def edit_events_and_corrections(sheets_edit):
         with col2:
             new_serviced_by = st.text_input("فني الخدمة:", value=editing_data.get("Servised by", ""), key="edit_serviced_by")
         
-        # حقول الإيفينت والكوريكشن
         event_col = None
         correction_col = None
         
@@ -1839,7 +2041,6 @@ def edit_events_and_corrections(sheets_edit):
             new_correction = st.text_area("التصحيح:", value=editing_data.get(correction_col, ""), key="edit_correction")
         
         if st.button("💾 حفظ التعديلات", key="save_edits_btn"):
-            # تحديث البيانات
             df.at[row_index, "card"] = new_card
             df.at[row_index, "Date"] = new_date
             
@@ -1848,7 +2049,6 @@ def edit_events_and_corrections(sheets_edit):
             if correction_col:
                 df.at[row_index, correction_col] = new_correction
             
-            # البحث عن عمود Servised by
             servised_col = None
             for col in df.columns:
                 if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]:
@@ -1860,7 +2060,6 @@ def edit_events_and_corrections(sheets_edit):
             
             sheets_edit[sheet_name] = df.astype(object)
             
-            # حفظ تلقائي في GitHub
             new_sheets = auto_save_to_github(
                 sheets_edit,
                 f"تعديل حدث في {sheet_name} - الصف {row_index}"
@@ -1868,27 +2067,29 @@ def edit_events_and_corrections(sheets_edit):
             if new_sheets is not None:
                 sheets_edit = new_sheets
                 st.success("✅ تم حفظ التعديلات بنجاح!")
-                # مسح بيانات الجلسة
                 if "editing_row" in st.session_state:
                     del st.session_state["editing_row"]
                 if "editing_data" in st.session_state:
                     del st.session_state["editing_data"]
                 st.rerun()
 
-# -------------------------------
-# 👥 إدارة المستخدمين (للمسؤولين فقط)
-# -------------------------------
+# ===============================
+# 👥 إدارة المستخدمين
+# ===============================
 def manage_users():
     """إدارة المستخدمين والصلاحيات"""
     st.header("👥 إدارة المستخدمين")
     
     users = load_users()
     
-    # عرض المستخدمين الحاليين
+    current_user = st.session_state.get("username")
+    if current_user != "admin":
+        st.error("❌ الصلاحية مقتصرة على المسؤول (admin) فقط.")
+        return
+    
     st.markdown("### 📋 المستخدمون الحاليون")
     
     if users:
-        # إنشاء DataFrame للمستخدمين
         users_data = []
         for username, user_info in users.items():
             users_data.append({
@@ -1905,7 +2106,6 @@ def manage_users():
     
     st.markdown("---")
     
-    # تبويبات لإدارة المستخدمين
     user_tabs = st.tabs(["➕ إضافة مستخدم جديد", "✏ تعديل مستخدم", "🗑 حذف مستخدم"])
     
     with user_tabs[0]:
@@ -1925,7 +2125,6 @@ def manage_users():
                 key="new_user_role"
             )
             
-            # اختيار الصلاحيات بناءً على الدور
             if user_role == "admin":
                 default_permissions = ["all"]
                 available_permissions = ["all", "view", "edit", "manage_users", "tech_support"]
@@ -1948,7 +2147,9 @@ def manage_users():
                 st.warning("⚠ الرجاء إدخال اسم المستخدم.")
                 return
             
-            if new_username in users:
+            current_users = load_users()
+            
+            if new_username in current_users:
                 st.error("❌ اسم المستخدم موجود بالفعل.")
                 return
             
@@ -1964,15 +2165,14 @@ def manage_users():
                 st.warning("⚠ كلمة المرور يجب أن تكون 6 أحرف على الأقل.")
                 return
             
-            # إضافة المستخدم الجديد
-            users[new_username] = {
+            current_users[new_username] = {
                 "password": new_password,
                 "role": user_role,
                 "permissions": selected_permissions if selected_permissions else default_permissions,
                 "created_at": datetime.now().isoformat()
             }
             
-            if save_users(users):
+            if save_users(current_users):
                 st.success(f"✅ تم إضافة المستخدم '{new_username}' بنجاح!")
                 st.rerun()
             else:
@@ -1984,27 +2184,30 @@ def manage_users():
         if not users:
             st.info("ℹ️ لا توجد مستخدمين لتعديلهم.")
         else:
+            user_list = list(users.keys())
+            
             user_to_edit = st.selectbox(
                 "اختر المستخدم للتعديل:",
-                list(users.keys()),
+                user_list,
                 key="select_user_to_edit"
             )
             
             if user_to_edit:
-                user_info = users[user_to_edit]
+                current_users = load_users()
+                user_info = current_users.get(user_to_edit, {})
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     st.info(f"**المستخدم:** {user_to_edit}")
                     st.info(f"**الدور الحالي:** {user_info.get('role', 'viewer')}")
                     
-                    # تغيير كلمة المرور
                     st.markdown("##### 🔐 تغيير كلمة المرور")
-                    new_password_edit = st.text_input("كلمة المرور الجديدة:", type="password", key="edit_password")
-                    confirm_password_edit = st.text_input("تأكيد كلمة المرور:", type="password", key="edit_confirm_password")
+                    new_password_edit = st.text_input("كلمة المرور الجديدة:", type="password", 
+                                                      key="edit_password")
+                    confirm_password_edit = st.text_input("تأكيد كلمة المرور:", type="password", 
+                                                         key="edit_confirm_password")
                 
                 with col2:
-                    # تغيير الدور
                     new_role = st.selectbox(
                         "تغيير الدور:",
                         ["admin", "editor", "viewer"],
@@ -2012,7 +2215,6 @@ def manage_users():
                         key="edit_user_role"
                     )
                     
-                    # تغيير الصلاحيات بناءً على الدور الجديد
                     if new_role == "admin":
                         default_permissions = ["all"]
                         available_permissions = ["all", "view", "edit", "manage_users", "tech_support"]
@@ -2031,19 +2233,23 @@ def manage_users():
                         key="edit_user_permissions"
                     )
                 
-                # أزرار التعديل
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     if st.button("💾 حفظ التعديلات", key="save_user_edit"):
                         updated = False
                         
-                        # تحديث الدور والصلاحيات
-                        if user_info.get("role") != new_role or user_info.get("permissions") != new_permissions:
-                            users[user_to_edit]["role"] = new_role
-                            users[user_to_edit]["permissions"] = new_permissions if new_permissions else default_permissions
+                        latest_users = load_users()
+                        
+                        if user_to_edit not in latest_users:
+                            st.error("❌ المستخدم غير موجود.")
+                            return
+                        
+                        if latest_users[user_to_edit].get("role") != new_role or \
+                           latest_users[user_to_edit].get("permissions") != new_permissions:
+                            latest_users[user_to_edit]["role"] = new_role
+                            latest_users[user_to_edit]["permissions"] = new_permissions if new_permissions else default_permissions
                             updated = True
                         
-                        # تحديث كلمة المرور إذا تم إدخالها
                         if new_password_edit:
                             if new_password_edit != confirm_password_edit:
                                 st.error("❌ كلمة المرور غير مطابقة.")
@@ -2052,14 +2258,13 @@ def manage_users():
                                 st.warning("⚠ كلمة المرور يجب أن تكون 6 أحرف على الأقل.")
                                 return
                             
-                            users[user_to_edit]["password"] = new_password_edit
+                            latest_users[user_to_edit]["password"] = new_password_edit
                             updated = True
                         
                         if updated:
-                            if save_users(users):
+                            if save_users(latest_users):
                                 st.success(f"✅ تم تحديث المستخدم '{user_to_edit}' بنجاح!")
                                 
-                                # إذا كان المستخدم الحالي هو الذي تم تعديله، قم بتحديث session state
                                 if st.session_state.get("username") == user_to_edit:
                                     st.session_state.user_role = new_role
                                     st.session_state.user_permissions = new_permissions if new_permissions else default_permissions
@@ -2072,16 +2277,10 @@ def manage_users():
                             st.info("ℹ️ لم يتم إجراء أي تغييرات.")
                 
                 with col_btn2:
-                    # زر إعادة تعيين كلمة المرور
-                    if st.button("🔄 إعادة تعيين كلمة المرور", key="reset_password"):
-                        # كلمة مرور افتراضية
-                        default_password = "user123"
-                        users[user_to_edit]["password"] = default_password
-                        
-                        if save_users(users):
-                            st.warning(f"⚠ تم إعادة تعيين كلمة مرور '{user_to_edit}' إلى: {default_password}")
-                            st.info("📋 يجب على المستخدم تغيير كلمة المرور عند أول تسجيل دخول.")
-                            st.rerun()
+                    if st.button("🔄 تحديث البيانات", key="refresh_user_data"):
+                        users = load_users()
+                        st.success("✅ تم تحديث البيانات من الملف.")
+                        st.rerun()
     
     with user_tabs[2]:
         st.markdown("#### 🗑 حذف مستخدم")
@@ -2089,11 +2288,11 @@ def manage_users():
         if not users:
             st.info("ℹ️ لا توجد مستخدمين لحذفهم.")
         else:
-            # قائمة المستخدمين المتاحة للحذف (لا يمكن حذف المسؤول الرئيسي)
-            deletable_users = [u for u in users.keys() if u != "admin"]
+            deletable_users = [u for u in users.keys() 
+                             if u != "admin" and u != current_user]
             
             if not deletable_users:
-                st.warning("⚠ لا يمكن حذف أي مستخدمين (يوجد المسؤول الرئيسي فقط).")
+                st.warning("⚠ لا يمكن حذف أي مستخدمين.")
             else:
                 user_to_delete = st.selectbox(
                     "اختر المستخدم للحذف:",
@@ -2108,29 +2307,33 @@ def manage_users():
                     st.info(f"**الدور:** {user_info.get('role', 'viewer')}")
                     st.info(f"**تاريخ الإنشاء:** {user_info.get('created_at', 'غير معروف')}")
                     
-                    # تأكيد الحذف
-                    confirm_delete = st.checkbox(f"أؤكد أنني أريد حذف المستخدم '{user_to_delete}'", key="confirm_delete")
+                    confirm_delete = st.checkbox(f"أؤكد أنني أريد حذف المستخدم '{user_to_delete}'", 
+                                                key="confirm_delete")
                     
                     if confirm_delete:
-                        if st.button("🗑️ حذف المستخدم نهائياً", type="primary", key="delete_user_final"):
-                            # التحقق من أن المستخدم ليس مسجلاً دخولاً حالياً
+                        if st.button("🗑️ حذف المستخدم نهائياً", type="primary", 
+                                    key="delete_user_final"):
                             state = load_state()
                             if user_to_delete in state and state[user_to_delete].get("active"):
                                 st.error("❌ لا يمكن حذف المستخدم أثناء تسجيل دخوله.")
                                 return
                             
-                            # حذف المستخدم
-                            del users[user_to_delete]
+                            latest_users = load_users()
                             
-                            if save_users(users):
-                                st.success(f"✅ تم حذف المستخدم '{user_to_delete}' بنجاح!")
-                                st.rerun()
+                            if user_to_delete in latest_users:
+                                del latest_users[user_to_delete]
+                                
+                                if save_users(latest_users):
+                                    st.success(f"✅ تم حذف المستخدم '{user_to_delete}' بنجاح!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ حدث خطأ أثناء حذف المستخدم.")
                             else:
-                                st.error("❌ حدث خطأ أثناء حذف المستخدم.")
+                                st.error("❌ المستخدم غير موجود.")
 
-# -------------------------------
+# ===============================
 # 📞 الدعم الفني
-# -------------------------------
+# ===============================
 def tech_support():
     """قسم الدعم الفني"""
     st.header("📞 الدعم الفني")
@@ -2165,31 +2368,26 @@ def tech_support():
     ### 📊 إحصائيات النظام
     """)
     
-    # عرض إحصائيات النظام
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # عدد المستخدمين
         users = load_users()
         st.metric("👥 عدد المستخدمين", len(users))
     
     with col2:
-        # عدد الجلسات النشطة
         state = load_state()
         active_sessions = sum(1 for u in state.values() if u.get("active"))
         st.metric("🔒 جلسات نشطة", f"{active_sessions}/{MAX_ACTIVE_USERS}")
     
     with col3:
-        # حجم الملف المحلي
         if os.path.exists(APP_CONFIG["LOCAL_FILE"]):
-            file_size = os.path.getsize(APP_CONFIG["LOCAL_FILE"]) / (1024 * 1024)  # بالميجابايت
+            file_size = os.path.getsize(APP_CONFIG["LOCAL_FILE"]) / (1024 * 1024)
             st.metric("💾 حجم الملف", f"{file_size:.2f} MB")
         else:
             st.metric("💾 حجم الملف", "غير موجود")
     
     st.markdown("---")
     
-    # معلومات الجلسة الحالية
     st.markdown("### 🖥 معلومات الجلسة الحالية")
     
     if st.session_state.get("logged_in"):
@@ -2205,7 +2403,6 @@ def tech_support():
     else:
         st.info("ℹ️ لم يتم تسجيل الدخول")
     
-    # زر إعادة التشغيل
     st.markdown("---")
     if st.button("🔄 إعادة تشغيل التطبيق", key="restart_app"):
         try:
@@ -2215,224 +2412,199 @@ def tech_support():
             st.error(f"❌ خطأ في إعادة التشغيل: {e}")
 
 # ===============================
-# 🖥 الواجهة الرئيسية المدمجة
+# 🏠 الواجهة الرئيسية
 # ===============================
-# إعداد الصفحة
-st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
-
-# شريط تسجيل الدخول / معلومات الجلسة في الشريط الجانبي
-with st.sidebar:
-    st.header("👤 الجلسة")
-    if not st.session_state.get("logged_in"):
-        if not login_ui():
-            st.stop()
-    else:
-        state = cleanup_sessions(load_state())
-        username = st.session_state.username
-        user_role = st.session_state.user_role
-        rem = remaining_time(state, username)
-        if rem:
-            mins, secs = divmod(int(rem.total_seconds()), 60)
-            st.success(f"👋 {username} | الدور: {user_role} | ⏳ {mins:02d}:{secs:02d}")
+def main():
+    """الدالة الرئيسية للتطبيق"""
+    st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
+    
+    with st.sidebar:
+        st.header("👤 الجلسة")
+        
+        if not st.session_state.get("logged_in"):
+            if not login_ui():
+                st.stop()
         else:
+            state = cleanup_sessions(load_state())
+            username = st.session_state.username
+            user_role = st.session_state.user_role
+            rem = remaining_time(state, username)
+            
+            if rem:
+                mins, secs = divmod(int(rem.total_seconds()), 60)
+                st.success(f"👋 {username} | الدور: {user_role} | ⏳ {mins:02d}:{secs:02d}")
+            else:
+                logout_action()
+        
+        st.markdown("---")
+        st.write("🔧 أدوات:")
+        
+        if st.button("🔄 تحديث الملف من GitHub", key="refresh_github"):
+            if fetch_from_github_requests():
+                st.rerun()
+        
+        if st.button("🗑 مسح الكاش", key="clear_cache"):
+            try:
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ خطأ في مسح الكاش: {e}")
+        
+        st.markdown("---")
+        if st.button("🚪 تسجيل الخروج", key="logout_btn"):
             logout_action()
-
-    st.markdown("---")
-    st.write("🔧 أدوات:")
-    if st.button("🔄 تحديث الملف من GitHub", key="refresh_github"):
-        if fetch_from_github_requests():
-            st.rerun()
     
-    # زر مسح الكاش
-    if st.button("🗑 مسح الكاش", key="clear_cache"):
-        try:
-            st.cache_data.clear()
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ خطأ في مسح الكاش: {e}")
+    all_sheets = load_all_sheets()
+    sheets_edit = load_sheets_for_edit()
     
-    # زر تحديث الجلسة
-    if st.button("🔄 تحديث الجلسة", key="refresh_session"):
-        # تحميل أحدث بيانات المستخدم
-        users = load_users()
-        username = st.session_state.get("username")
-        if username and username in users:
-            st.session_state.user_role = users[username].get("role", "viewer")
-            st.session_state.user_permissions = users[username].get("permissions", ["view"])
-            st.success("✅ تم تحديث بيانات الجلسة!")
-            st.rerun()
-        else:
-            st.warning("⚠ لا يمكن تحديث الجلسة.")
+    st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
     
-    st.markdown("---")
-    # زر لإعادة تسجيل الخروج
-    if st.button("🚪 تسجيل الخروج", key="logout_btn"):
-        logout_action()
-
-# تحميل الشيتات (عرض وتحليل)
-all_sheets = load_all_sheets()
-
-# تحميل الشيتات للتحرير (dtype=object)
-sheets_edit = load_sheets_for_edit()
-
-# واجهة التبويبات الرئيسية
-st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
-
-# التحقق من الصلاحيات - استخدم .get() لمنع الأخطاء
-username = st.session_state.get("username")
-user_role = st.session_state.get("user_role", "viewer")
-user_permissions = st.session_state.get("user_permissions", ["view"])
-permissions = get_user_permissions(user_role, user_permissions)
-
-# تحديد التبويبات بناءً على الصلاحيات
-if permissions["can_manage_users"]:  # admin
-    tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
+    username = st.session_state.get("username")
+    user_role = st.session_state.get("user_role", "viewer")
+    user_permissions = st.session_state.get("user_permissions", ["view"])
+    permissions = get_user_permissions(user_role, user_permissions)
     
-    # Tab: إدارة المستخدمين (للمسؤولين فقط)
-    with tabs[3]:
-        manage_users()
-    
-    # Tab: الدعم الفني (للمسؤولين فقط أو إذا كان الإعداد يسمح للجميع)
-    if APP_CONFIG["SHOW_TECH_SUPPORT_TO_ALL"] or permissions["can_manage_users"]:
+    if permissions["can_manage_users"]:
+        tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
+        
+        with tabs[0]:
+            st.header("📊 فحص السيرفيس")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    card_num = st.number_input("رقم الماكينة:", min_value=1, step=1, key="card_num_service")
+                with col2:
+                    current_tons = st.number_input("عدد الأطنان الحالية:", min_value=0, step=100, key="current_tons_service")
+
+                if st.button("عرض حالة السيرفيس", key="show_service"):
+                    st.session_state["show_service_results"] = True
+
+                if st.session_state.get("show_service_results", False):
+                    check_service_status(card_num, current_tons, all_sheets)
+        
+        with tabs[1]:
+            st.header("📋 فحص الإيفينت والكوريكشن")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                check_events_and_corrections(all_sheets)
+        
+        with tabs[2]:
+            st.header("🛠 تعديل وإدارة البيانات")
+
+            token_exists = bool(st.secrets.get("github", {}).get("token", None))
+            can_push = token_exists and GITHUB_AVAILABLE
+
+            if sheets_edit is None:
+                st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
+            else:
+                tab1, tab2, tab3 = st.tabs([
+                    "عرض وتعديل شيت",
+                    "➕ إضافة حدث جديد",
+                    "✏ تعديل الحدث"
+                ])
+
+                with tab1:
+                    sheets_edit = edit_sheet_with_save_button(sheets_edit)
+
+                with tab2:
+                    add_new_event(sheets_edit)
+
+                with tab3:
+                    edit_events_and_corrections(sheets_edit)
+        
+        with tabs[3]:
+            manage_users()
+        
         with tabs[4]:
             tech_support()
     
-elif permissions["can_edit"]:  # editor
-    tabs = st.tabs(["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن", "🛠 تعديل وإدارة البيانات"])
-else:  # viewer
-    tabs = st.tabs(["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن"])
+    elif permissions["can_edit"]:
+        tabs = st.tabs([
+            "📊 فحص السيرفيس", 
+            "📋 فحص الإيفينت والكوريكشن", 
+            "🛠 تعديل وإدارة البيانات"
+        ])
+        
+        with tabs[0]:
+            st.header("📊 فحص السيرفيس")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    card_num = st.number_input("رقم الماكينة:", min_value=1, step=1, key="card_num_service")
+                with col2:
+                    current_tons = st.number_input("عدد الأطنان الحالية:", min_value=0, step=100, key="current_tons_service")
 
-# -------------------------------
-# Tab: فحص السيرفيس (لجميع المستخدمين)
-# -------------------------------
-with tabs[0]:
-    st.header("📊 فحص السيرفيس")
+                if st.button("عرض حالة السيرفيس", key="show_service"):
+                    st.session_state["show_service_results"] = True
+
+                if st.session_state.get("show_service_results", False):
+                    check_service_status(card_num, current_tons, all_sheets)
+        
+        with tabs[1]:
+            st.header("📋 فحص الإيفينت والكوريكشن")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                check_events_and_corrections(all_sheets)
+        
+        with tabs[2]:
+            st.header("🛠 تعديل وإدارة البيانات")
+
+            if sheets_edit is None:
+                st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
+            else:
+                tab1, tab2 = st.tabs([
+                    "➕ إضافة حدث جديد",
+                    "✏ تعديل الحدث"
+                ])
+
+                with tab1:
+                    add_new_event(sheets_edit)
+
+                with tab2:
+                    edit_events_and_corrections(sheets_edit)
     
-    if all_sheets is None:
-        st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            card_num = st.number_input("رقم الماكينة:", min_value=1, step=1, key="card_num_service")
-        with col2:
-            current_tons = st.number_input("عدد الأطنان الحالية:", min_value=0, step=100, key="current_tons_service")
+        tabs = st.tabs([
+            "📊 فحص السيرفيس", 
+            "📋 فحص الإيفينت والكوريكشن"
+        ])
+        
+        with tabs[0]:
+            st.header("📊 فحص السيرفيس")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    card_num = st.number_input("رقم الماكينة:", min_value=1, step=1, key="card_num_service")
+                with col2:
+                    current_tons = st.number_input("عدد الأطنان الحالية:", min_value=0, step=100, key="current_tons_service")
 
-        if st.button("عرض حالة السيرفيس", key="show_service"):
-            st.session_state["show_service_results"] = True
+                if st.button("عرض حالة السيرفيس", key="show_service"):
+                    st.session_state["show_service_results"] = True
 
-        if st.session_state.get("show_service_results", False):
-            check_service_status(card_num, current_tons, all_sheets)
+                if st.session_state.get("show_service_results", False):
+                    check_service_status(card_num, current_tons, all_sheets)
+        
+        with tabs[1]:
+            st.header("📋 فحص الإيفينت والكوريكشن")
+            
+            if all_sheets is None:
+                st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
+            else:
+                check_events_and_corrections(all_sheets)
 
-# -------------------------------
-# Tab: فحص الإيفينت والكوريكشن (لجميع المستخدمين)
-# -------------------------------
-with tabs[1]:
-    st.header("📋 فحص الإيفينت والكوريكشن")
-    
-    if all_sheets is None:
-        st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
-    else:
-        # واجهة بحث متعدد المعايير
-        check_events_and_corrections(all_sheets)
-
-# -------------------------------
-# Tab: تعديل وإدارة البيانات - للمحررين والمسؤولين فقط
-# -------------------------------
-if permissions["can_edit"] and len(tabs) > 2:
-    with tabs[2]:
-        st.header("🛠 تعديل وإدارة البيانات")
-
-        # تحقق صلاحية الرفع
-        token_exists = bool(st.secrets.get("github", {}).get("token", None))
-        can_push = token_exists and GITHUB_AVAILABLE
-
-        if sheets_edit is None:
-            st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
-        else:
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "عرض وتعديل شيت",
-                "إضافة صف جديد", 
-                "إضافة عمود جديد",
-                "➕ إضافة حدث جديد",
-                "✏ تعديل الحدث"
-            ])
-
-            # Tab 1: تعديل بيانات وعرض
-            with tab1:
-                st.subheader("✏ تعديل البيانات")
-                sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
-                df = sheets_edit[sheet_name].astype(str)
-
-                edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, 
-                                         key=f"editor_{sheet_name}")
-                
-                if not edited_df.equals(df):
-                    st.info("🔄 يتم حفظ التغييرات تلقائياً...")
-                    sheets_edit[sheet_name] = edited_df.astype(object)
-                    new_sheets = auto_save_to_github(
-                        sheets_edit, 
-                        f"تعديل تلقائي في شيت {sheet_name}"
-                    )
-                    if new_sheets is not None:
-                        sheets_edit = new_sheets
-                        st.rerun()
-
-            # Tab 2: إضافة صف جديد
-            with tab2:
-                st.subheader("➕ إضافة صف جديد")
-                sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-                df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-                
-                st.markdown("أدخل بيانات الصف الجديد:")
-
-                new_data = {}
-                cols = st.columns(3)
-                for i, col in enumerate(df_add.columns):
-                    with cols[i % 3]:
-                        new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
-
-                if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}"):
-                    new_row_df = pd.DataFrame([new_data]).astype(str)
-                    df_new = pd.concat([df_add, new_row_df], ignore_index=True)
-                    
-                    sheets_edit[sheet_name_add] = df_new.astype(object)
-
-                    new_sheets = auto_save_to_github(
-                        sheets_edit,
-                        f"إضافة صف جديد في {sheet_name_add}"
-                    )
-                    if new_sheets is not None:
-                        sheets_edit = new_sheets
-                        st.rerun()
-
-            # Tab 3: إضافة عمود جديد
-            with tab3:
-                st.subheader("🆕 إضافة عمود جديد")
-                sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
-                df_col = sheets_edit[sheet_name_col].astype(str)
-                
-                new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
-                default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
-
-                if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}"):
-                    if new_col_name:
-                        df_col[new_col_name] = default_value
-                        sheets_edit[sheet_name_col] = df_col.astype(object)
-                        
-                        new_sheets = auto_save_to_github(
-                            sheets_edit,
-                            f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}"
-                        )
-                        if new_sheets is not None:
-                            sheets_edit = new_sheets
-                            st.rerun()
-                    else:
-                        st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
-
-            # Tab 4: إضافة إيفينت جديد
-            with tab4:
-                add_new_event(sheets_edit)
-
-            # Tab 5: تعديل الإيفينت والكوريكشن
-            with tab5:
-                edit_events_and_corrections(sheets_edit)
+# تشغيل التطبيق
+if __name__ == "__main__":
+    main()
