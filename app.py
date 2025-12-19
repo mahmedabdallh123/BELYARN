@@ -32,7 +32,7 @@ APP_CONFIG = {
     "LOCAL_FILE": "l4.xlsx",
     
     # إعدادات الأمان
-    "MAX_ACTIVE_USERS": 2,
+    "MAX_ACTIVE_USERS": 5,
     "SESSION_DURATION_MINUTES": 15,
     
     # إعدادات الواجهة
