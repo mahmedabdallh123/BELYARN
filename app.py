@@ -748,8 +748,22 @@ def check_service_status(card_num, current_tons, all_sheets):
             service_stats["service_counts"][service] = service_stats["service_counts"].get(service, 0) + 1
         service_stats["total_needed_services"] += len(needed_parts)
 
-        # البحث في خدمات الماكينة
-        mask = (services_df.get("Min_Tones", 0).fillna(0) <= slice_max) & (services_df.get("Max_Tones", 0).fillna(0) >= slice_min)
+        # البحث في خدمات الماكينة - التصحيح هنا
+        # استخدام أسماء الأعمدة الفعلية بدلاً من متغيرات غير معرفة
+        if "Min_Tones" in services_df.columns and "Max_Tones" in services_df.columns:
+            mask = (services_df["Min_Tones"].fillna(0) <= slice_max) & (services_df["Max_Tones"].fillna(0) >= slice_min)
+        elif "Min_Tones" in services_df.columns:
+            mask = (services_df["Min_Tones"].fillna(0) <= slice_max) & (services_df["Min_Tones"].fillna(0) >= slice_min)
+        elif "Max_Tones" in services_df.columns:
+            mask = (services_df["Max_Tones"].fillna(0) <= slice_max) & (services_df["Max_Tones"].fillna(0) >= slice_min)
+        else:
+            # إذا لم توجد أعمدة Min_Tones و Max_Tones، نستخدم عمود Tones
+            if "Tones" in services_df.columns:
+                mask = services_df["Tones"].notna()
+            else:
+                # إذا لم توجد أعمدة مناسبة، نستخدم كل الصفوف
+                mask = pd.Series([True] * len(services_df), index=services_df.index)
+        
         matching_rows = services_df[mask]
 
         if not matching_rows.empty:
