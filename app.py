@@ -160,11 +160,9 @@ def display_images(image_value, caption="الصور المرفقة"):
                 url = urls[idx].strip()
                 with cols[j]:
                     try:
-                        # إذا كان الرابط يبدأ بـ http، نعرضه مباشرة
                         if url.startswith("http"):
                             st.image(url, caption=url.split("/")[-1], use_column_width=True)
                         else:
-                            # محاولة عرض الملف المحلي (للتوافق القديم)
                             if os.path.exists(url):
                                 st.image(url, caption=os.path.basename(url), use_column_width=True)
                             else:
@@ -174,7 +172,7 @@ def display_images(image_value, caption="الصور المرفقة"):
                         st.caption(f"خطأ: {str(e)[:50]}")
 
 # -------------------------------
-# دوال مساعدة للملفات والحالة (بدون تغيير جوهري)
+# دوال مساعدة للملفات والحالة
 # -------------------------------
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -533,42 +531,761 @@ def get_images_value(row):
     return ""
 
 # -------------------------------
-# دوال فحص السيرفيس والإيفينتات (مختصرة للاختصار)
+# دالة فحص السيرفيس
 # -------------------------------
 def check_service_status(card_num, current_tons, all_sheets):
-    # نفس الكود السابق مع استخدام display_images المعدلة
-    # (سيتم تضمينه كاملاً في الرد النهائي ولكن اختصرت هنا للطول)
-    st.warning("سيتم عرض دالة check_service_status كاملة في الكود النهائي")
-    pass
+    if not all_sheets:
+        st.error("❌ لم يتم تحميل أي شيتات.")
+        return
+    if "ServicePlan" not in all_sheets:
+        st.error("❌ الملف لا يحتوي على شيت ServicePlan.")
+        return
+    
+    service_plan_df = all_sheets["ServicePlan"]
+    card_services_sheet_name = f"Card{card_num}_Services"
+    
+    if card_services_sheet_name not in all_sheets:
+        card_old_sheet_name = f"Card{card_num}"
+        if card_old_sheet_name in all_sheets:
+            card_df = all_sheets[card_old_sheet_name]
+            services_df = card_df[
+                (card_df.get("Min_Tones", pd.NA).notna()) & 
+                (card_df.get("Max_Tones", pd.NA).notna()) &
+                (card_df.get("Min_Tones", "") != "") & 
+                (card_df.get("Max_Tones", "") != "")
+            ].copy()
+        else:
+            st.warning(f"⚠ لا يوجد شيت باسم {card_services_sheet_name} أو {card_old_sheet_name}")
+            return
+    else:
+        card_df = all_sheets[card_services_sheet_name]
+        services_df = card_df.copy()
+
+    st.subheader("⚙ نطاق العرض")
+    view_option = st.radio(
+        "اختر نطاق العرض:",
+        ("الشريحة الحالية فقط", "كل الشرائح الأقل", "كل الشرائح الأعلى", "نطاق مخصص", "كل الشرائح"),
+        horizontal=True,
+        key=f"service_view_option_{card_num}"
+    )
+
+    min_range = st.session_state.get(f"service_min_range_{card_num}", max(0, current_tons - 500))
+    max_range = st.session_state.get(f"service_max_range_{card_num}", current_tons + 500)
+    if view_option == "نطاق مخصص":
+        col1, col2 = st.columns(2)
+        with col1:
+            min_range = st.number_input("من (طن):", min_value=0, step=100, value=min_range, key=f"service_min_range_{card_num}")
+        with col2:
+            max_range = st.number_input("إلى (طن):", min_value=min_range, step=100, value=max_range, key=f"service_max_range_{card_num}")
+
+    if view_option == "الشريحة الحالية فقط":
+        selected_slices = service_plan_df[(service_plan_df["Min_Tones"] <= current_tons) & (service_plan_df["Max_Tones"] >= current_tons)]
+    elif view_option == "كل الشرائح الأقل":
+        selected_slices = service_plan_df[service_plan_df["Max_Tones"] <= current_tons]
+    elif view_option == "كل الشرائح الأعلى":
+        selected_slices = service_plan_df[service_plan_df["Min_Tones"] >= current_tons]
+    elif view_option == "نطاق مخصص":
+        selected_slices = service_plan_df[(service_plan_df["Min_Tones"] >= min_range) & (service_plan_df["Max_Tones"] <= max_range)]
+    else:
+        selected_slices = service_plan_df.copy()
+
+    if selected_slices.empty:
+        st.warning("⚠ لا توجد شرائح مطابقة حسب النطاق المحدد.")
+        return
+
+    all_results = []
+    service_stats = {"service_counts": {}, "service_done_counts": {}, "total_needed_services": 0, "total_done_services": 0, "by_slice": {}}
+    
+    for _, current_slice in selected_slices.iterrows():
+        slice_min = current_slice["Min_Tones"]
+        slice_max = current_slice["Max_Tones"]
+        slice_key = f"{slice_min}-{slice_max}"
+        
+        needed_service_raw = current_slice.get("Service", "")
+        needed_parts = split_needed_services(needed_service_raw)
+        needed_norm = [normalize_name(p) for p in needed_parts]
+        
+        service_stats["by_slice"][slice_key] = {"needed": needed_parts, "done": [], "not_done": [], "total_needed": len(needed_parts), "total_done": 0}
+        
+        for service in needed_parts:
+            service_stats["service_counts"][service] = service_stats["service_counts"].get(service, 0) + 1
+        service_stats["total_needed_services"] += len(needed_parts)
+
+        if "Min_Tones" in services_df.columns and "Max_Tones" in services_df.columns:
+            mask = (services_df["Min_Tones"].fillna(0) <= slice_max) & (services_df["Max_Tones"].fillna(0) >= slice_min)
+        elif "Min_Tones" in services_df.columns:
+            mask = (services_df["Min_Tones"].fillna(0) <= slice_max) & (services_df["Min_Tones"].fillna(0) >= slice_min)
+        elif "Max_Tones" in services_df.columns:
+            mask = (services_df["Max_Tones"].fillna(0) <= slice_max) & (services_df["Max_Tones"].fillna(0) >= slice_min)
+        else:
+            if "Tones" in services_df.columns:
+                mask = services_df["Tones"].notna()
+            else:
+                mask = pd.Series([True] * len(services_df), index=services_df.index)
+        
+        matching_rows = services_df[mask]
+
+        if not matching_rows.empty:
+            for _, row in matching_rows.iterrows():
+                done_services_set = set()
+                metadata_columns = {
+                    "card", "Tones", "Min_Tones", "Max_Tones", "Date", 
+                    "Other", "Servised by", "Event", "Correction", "Images",
+                    "Card", "TONES", "MIN_TONES", "MAX_TONES", "DATE",
+                    "OTHER", "EVENT", "CORRECTION", "SERVISED BY", "IMAGES",
+                    "servised by", "Servised By", "Serviced by", "Service by", 
+                    "Serviced By", "Service By", "خدم بواسطة", "تم الخدمة بواسطة", 
+                    "فني الخدمة", "صور", "الصور", "مرفقات", "المرفقات"
+                }
+                all_columns = set(services_df.columns)
+                service_columns = all_columns - metadata_columns
+                final_service_columns = set()
+                for col in service_columns:
+                    col_normalized = normalize_name(col)
+                    metadata_normalized = {normalize_name(mc) for mc in metadata_columns}
+                    if col_normalized not in metadata_normalized:
+                        final_service_columns.add(col)
+                
+                for col in final_service_columns:
+                    val = str(row.get(col, "")).strip()
+                    if val and val.lower() not in ["nan", "none", "", "null", "0"]:
+                        if val.lower() not in ["no", "false", "not done", "لم تتم", "x", "-"]:
+                            done_services_set.add(col)
+                            service_stats["service_done_counts"][col] = service_stats["service_done_counts"].get(col, 0) + 1
+                            service_stats["total_done_services"] += 1
+
+                current_date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
+                current_tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
+                servised_by_value = get_servised_by_value(row)
+                images_value = get_images_value(row)
+                
+                done_services = sorted(list(done_services_set))
+                done_norm = [normalize_name(c) for c in done_services]
+                
+                service_stats["by_slice"][slice_key]["done"].extend(done_services)
+                service_stats["by_slice"][slice_key]["total_done"] += len(done_services)
+                
+                not_done = []
+                for needed_part, needed_norm_part in zip(needed_parts, needed_norm):
+                    if needed_norm_part not in done_norm:
+                        not_done.append(needed_part)
+                
+                service_stats["by_slice"][slice_key]["not_done"].extend(not_done)
+
+                all_results.append({
+                    "Card Number": card_num,
+                    "Min_Tons": slice_min,
+                    "Max_Tons": slice_max,
+                    "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
+                    "Service Done": ", ".join(done_services) if done_services else "-",
+                    "Service Didn't Done": ", ".join(not_done) if not_done else "-",
+                    "Tones": current_tones,
+                    "Servised by": servised_by_value,
+                    "Date": current_date,
+                    "Images": images_value if images_value else "-"
+                })
+        else:
+            all_results.append({
+                "Card Number": card_num,
+                "Min_Tons": slice_min,
+                "Max_Tons": slice_max,
+                "Service Needed": " + ".join(needed_parts) if needed_parts else "-",
+                "Service Done": "-",
+                "Service Didn't Done": ", ".join(needed_parts) if needed_parts else "-",
+                "Tones": "-",
+                "Servised by": "-",
+                "Date": "-",
+                "Images": "-"
+            })
+            service_stats["by_slice"][slice_key]["not_done"] = needed_parts.copy()
+
+    result_df = pd.DataFrame(all_results).dropna(how="all").reset_index(drop=True)
+
+    st.markdown("### 📋 نتائج فحص السيرفيس")
+    if not result_df.empty:
+        st.dataframe(result_df.style.apply(style_table, axis=1), use_container_width=True)
+        show_service_statistics(service_stats, result_df)
+        if "Images" in result_df.columns:
+            for idx, row in result_df.iterrows():
+                images_value = row.get("Images", "")
+                if images_value and images_value != "-":
+                    display_images(images_value, f"📷 صور للحدث #{idx+1}")
+        buffer = io.BytesIO()
+        result_df.to_excel(buffer, index=False, engine="openpyxl")
+        st.download_button(
+            label="💾 حفظ النتائج كـ Excel",
+            data=buffer.getvalue(),
+            file_name=f"Service_Report_Card{card_num}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("ℹ️ لا توجد خدمات مسجلة لهذه الماكينة.")
 
 def show_service_statistics(service_stats, result_df):
-    pass
+    st.markdown("---")
+    st.markdown("### 📊 الإحصائيات والنسب المئوية")
+    if service_stats["total_needed_services"] == 0:
+        st.info("ℹ️ لا توجد خدمات مطلوبة في النطاق المحدد.")
+        return
+    completion_rate = (service_stats["total_done_services"] / service_stats["total_needed_services"]) * 100 if service_stats["total_needed_services"] > 0 else 0
+    completion_rate = max(0, min(100, completion_rate))
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(label="📈 نسبة الإنجاز العامة", value=f"{completion_rate:.1f}%", delta=f"{service_stats['total_done_services']}/{service_stats['total_needed_services']}")
+    with col2:
+        st.metric(label="🔢 عدد الخدمات المطلوبة", value=service_stats["total_needed_services"])
+    with col3:
+        st.metric(label="✅ الخدمات المنفذة", value=service_stats["total_done_services"])
+    with col4:
+        remaining = service_stats["total_needed_services"] - service_stats["total_done_services"]
+        st.metric(label="⏳ الخدمات المتبقية", value=remaining)
+    st.markdown("---")
+    stat_tabs = st.tabs(["📝 إحصائيات الخدمات", "📋 توزيع الخدمات", "📊 حسب الشريحة"])
+    with stat_tabs[0]:
+        st.markdown("#### 📝 إحصائيات مفصلة لكل خدمة")
+        stat_data = []
+        all_services = set(service_stats["service_counts"].keys()).union(set(service_stats["service_done_counts"].keys()))
+        for service in sorted(all_services):
+            needed_count = service_stats["service_counts"].get(service, 0)
+            done_count = service_stats["service_done_counts"].get(service, 0)
+            if needed_count > 0:
+                completion_rate_service = (done_count / needed_count) * 100
+                completion_rate_service = max(0, min(100, completion_rate_service))
+            else:
+                completion_rate_service = 0
+            stat_data.append({"الخدمة": service, "مطلوبة": needed_count, "منفذة": done_count, "متبقية": needed_count - done_count, "نسبة الإنجاز": f"{completion_rate_service:.1f}%", "حالة": "✅ ممتاز" if completion_rate_service >= 90 else "🟢 جيد" if completion_rate_service >= 70 else "🟡 متوسط" if completion_rate_service >= 50 else "🔴 ضعيف"})
+        if stat_data:
+            stat_df = pd.DataFrame(stat_data)
+            st.dataframe(stat_df, use_container_width=True, height=400)
+        else:
+            st.info("ℹ️ لا توجد بيانات إحصائية للخدمات.")
+    with stat_tabs[1]:
+        st.markdown("#### 📋 توزيع الخدمات")
+        if service_stats["service_counts"]:
+            try:
+                import plotly.express as px
+                plot_data = []
+                for service, needed_count in service_stats["service_counts"].items():
+                    done_count = service_stats["service_done_counts"].get(service, 0)
+                    plot_data.append({"الخدمة": service, "النوع": "مطلوبة", "العدد": needed_count})
+                    plot_data.append({"الخدمة": service, "النوع": "منفذة", "العدد": done_count})
+                plot_df = pd.DataFrame(plot_data)
+                fig = px.bar(plot_df, x="الخدمة", y="العدد", color="النوع", barmode="group", title="توزيع الخدمات المطلوبة والمنفذة", color_discrete_map={"مطلوبة": "#FF6B6B", "منفذة": "#4ECDC4"})
+                fig.update_layout(xaxis_title="الخدمة", yaxis_title="العدد", showlegend=True, height=500)
+                st.plotly_chart(fig, use_container_width=True)
+                fig2 = px.pie(names=["✅ منفذة", "⏳ غير منفذة"], values=[service_stats["total_done_services"], service_stats["total_needed_services"] - service_stats["total_done_services"]], title="نسبة الإنجاز العامة", color_discrete_sequence=["#4ECDC4", "#FF6B6B"])
+                fig2.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig2, use_container_width=True)
+                st.markdown(f"**📈 نسبة الإنجاز العامة:** {completion_rate:.1f}%")
+                if 0 <= completion_rate <= 100:
+                    st.progress(completion_rate / 100)
+            except ImportError:
+                st.info("📊 عرض البيانات باستخدام الرسوم البيانية المضمنة في Streamlit")
+                st.markdown("**📋 توزيع الخدمات:**")
+                dist_data = []
+                for service, needed_count in service_stats["service_counts"].items():
+                    done_count = service_stats["service_done_counts"].get(service, 0)
+                    if needed_count > 0:
+                        completion_rate_service = (done_count / needed_count) * 100
+                        completion_rate_service = max(0, min(100, completion_rate_service))
+                    else:
+                        completion_rate_service = 0
+                    dist_data.append({"الخدمة": service, "مطلوبة": needed_count, "منفذة": done_count, "نسبة": f"{completion_rate_service:.1f}%"})
+                if dist_data:
+                    dist_df = pd.DataFrame(dist_data).sort_values("نسبة", ascending=False)
+                    st.dataframe(dist_df, use_container_width=True, height=300)
+                st.markdown("**📊 مخطط الخدمات المطلوبة مقابل المنفذة:**")
+                chart_data = pd.DataFrame({"الخدمة": list(service_stats["service_counts"].keys()), "مطلوبة": list(service_stats["service_counts"].values()), "منفذة": [service_stats["service_done_counts"].get(service, 0) for service in service_stats["service_counts"].keys()]})
+                if len(chart_data) > 10:
+                    chart_data = chart_data.nlargest(10, "مطلوبة")
+                st.bar_chart(chart_data.set_index("الخدمة"), height=400)
+                st.markdown(f"**📈 نسبة الإنجاز العامة:** {completion_rate:.1f}%")
+                if 0 <= completion_rate <= 100:
+                    st.progress(completion_rate / 100)
+        else:
+            st.info("ℹ️ لا توجد بيانات كافية لعرض المخططات.")
+    with stat_tabs[2]:
+        st.markdown("#### 📊 الإحصائيات حسب الشريحة")
+        slice_stats_data = []
+        for slice_key, slice_data in service_stats["by_slice"].items():
+            if slice_data["total_needed"] > 0:
+                completion_rate_slice = (slice_data["total_done"] / slice_data["total_needed"]) * 100
+                completion_rate_slice = max(0, min(100, completion_rate_slice))
+            else:
+                completion_rate_slice = 0
+            slice_stats_data.append({"الشريحة": slice_key, "الخدمات المطلوبة": slice_data["total_needed"], "الخدمات المنفذة": slice_data["total_done"], "الخدمات المتبقية": slice_data["total_needed"] - slice_data["total_done"], "نسبة الإنجاز": f"{completion_rate_slice:.1f}%", "حالة الشريحة": "✅ ممتازة" if completion_rate_slice >= 90 else "🟢 جيدة" if completion_rate_slice >= 70 else "🟡 متوسطة" if completion_rate_slice >= 50 else "🔴 ضعيفة"})
+        if slice_stats_data:
+            slice_stats_df = pd.DataFrame(slice_stats_data)
+            st.dataframe(slice_stats_df, use_container_width=True, height=400)
+            try:
+                import plotly.graph_objects as go
+                slice_ranges = []
+                completion_rates = []
+                for slice_item in slice_stats_data:
+                    slice_key = slice_item["الشريحة"]
+                    slice_range = slice_key.split("-")
+                    if len(slice_range) == 2:
+                        try:
+                            mid_point = (int(slice_range[0]) + int(slice_range[1])) / 2
+                            slice_ranges.append(mid_point)
+                            rate_text = slice_item["نسبة الإنجاز"]
+                            rate_value = float(rate_text.replace("%", "").strip())
+                            rate_value = max(0, min(100, rate_value))
+                            completion_rates.append(rate_value)
+                        except:
+                            continue
+                if slice_ranges and completion_rates:
+                    fig3 = go.Figure()
+                    fig3.add_trace(go.Scatter(x=slice_ranges, y=completion_rates, mode='lines+markers', name='نسبة الإنجاز', line=dict(color='#4ECDC4', width=3), marker=dict(size=10, color='#FF6B6B')))
+                    fig3.update_layout(title="نسبة الإنجاز حسب نطاق الأطنان", xaxis_title="نطاق الأطنان (منتصف الشريحة)", yaxis_title="نسبة الإنجاز (%)", height=400, showlegend=True)
+                    st.plotly_chart(fig3, use_container_width=True)
+            except ImportError:
+                if slice_stats_data:
+                    chart_data = []
+                    for slice_item in slice_stats_data:
+                        slice_key = slice_item["الشريحة"]
+                        slice_range = slice_key.split("-")
+                        if len(slice_range) == 2:
+                            try:
+                                mid_point = (int(slice_range[0]) + int(slice_range[1])) / 2
+                                rate_text = slice_item["نسبة الإنجاز"]
+                                rate_value = float(rate_text.replace("%", "").strip())
+                                rate_value = max(0, min(100, rate_value))
+                                chart_data.append({"نطاق الأطنان": mid_point, "نسبة الإنجاز": rate_value})
+                            except:
+                                continue
+                    if chart_data:
+                        chart_df = pd.DataFrame(chart_data).sort_values("نطاق الأطنان")
+                        st.line_chart(chart_df.set_index("نطاق الأطنان"), height=400)
+        else:
+            st.info("ℹ️ لا توجد بيانات إحصائية للشرائح.")
 
+# -------------------------------
+# دوال فحص الإيفينت والكوريكشن
+# -------------------------------
 def check_events_and_corrections(all_sheets):
-    # نفس الكود السابق
-    pass
+    if not all_sheets:
+        st.error("❌ لم يتم تحميل أي شيتات.")
+        return
+    
+    if "search_params" not in st.session_state:
+        st.session_state.search_params = {
+            "card_numbers": "",
+            "date_range": "",
+            "tech_names": "",
+            "search_text": "",
+            "exact_match": False,
+            "include_empty": True,
+            "sort_by": "رقم الماكينة",
+            "show_images": True
+        }
+    if "search_triggered" not in st.session_state:
+        st.session_state.search_triggered = False
+    
+    with st.container():
+        st.markdown("### 🔍 بحث متعدد المعايير")
+        st.markdown("استخدم الحقول التالية للبحث المحدد. يمكنك ملء واحد أو أكثر من الحقول.")
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            with st.expander("🔢 **أرقام الماكينات**", expanded=True):
+                st.caption("أدخل أرقام الماكينات (مفصولة بفواصل أو نطاقات)")
+                card_numbers = st.text_input("مثال: 1,3,5 أو 1-5 أو 2,4,7-10", value=st.session_state.search_params.get("card_numbers", ""), key="input_cards", placeholder="اتركه فارغاً للبحث في كل الماكينات")
+                st.caption("أو اختر من:")
+                quick_cards_col1, quick_cards_col2, quick_cards_col3 = st.columns(3)
+                with quick_cards_col1:
+                    if st.button("🔟 أول 10 ماكينات", key="quick_10"):
+                        st.session_state.search_params["card_numbers"] = "1-10"
+                        st.session_state.search_triggered = True
+                        st.rerun()
+                with quick_cards_col2:
+                    if st.button("🔟 ماكينات 11-20", key="quick_20"):
+                        st.session_state.search_params["card_numbers"] = "11-20"
+                        st.session_state.search_triggered = True
+                        st.rerun()
+                with quick_cards_col3:
+                    if st.button("🗑 مسح", key="clear_cards"):
+                        st.session_state.search_params["card_numbers"] = ""
+                        st.rerun()
+            with st.expander("📅 **التواريخ**", expanded=True):
+                st.caption("ابحث بالتاريخ (سنة، شهر/سنة)")
+                date_input = st.text_input("مثال: 2024 أو 1/2024 أو 2024,2025", value=st.session_state.search_params.get("date_range", ""), key="input_date", placeholder="اتركه فارغاً للبحث في كل التواريخ")
+        with col2:
+            with st.expander("👨‍🔧 **فنيو الخدمة**", expanded=True):
+                st.caption("ابحث بأسماء فنيي الخدمة")
+                tech_names = st.text_input("مثال: أحمد, محمد, علي", value=st.session_state.search_params.get("tech_names", ""), key="input_techs", placeholder="اتركه فارغاً للبحث في كل الفنيين")
+            with st.expander("📝 **نص البحث**", expanded=True):
+                st.caption("ابحث في وصف الحدث أو التصحيح")
+                search_text = st.text_input("مثال: صيانة, إصلاح, تغيير", value=st.session_state.search_params.get("search_text", ""), key="input_text", placeholder="اتركه فارغاً للبحث في كل النصوص")
+        with st.expander("⚙ **خيارات متقدمة**", expanded=False):
+            col_adv1, col_adv2, col_adv3 = st.columns(3)
+            with col_adv1:
+                search_mode = st.radio("🔍 طريقة البحث:", ["بحث جزئي", "مطابقة كاملة"], index=0 if not st.session_state.search_params.get("exact_match") else 1, key="radio_search_mode")
+            with col_adv2:
+                include_empty = st.checkbox("🔍 تضمين الحقول الفارغة", value=st.session_state.search_params.get("include_empty", True), key="checkbox_include_empty")
+            with col_adv3:
+                sort_by = st.selectbox("📊 ترتيب النتائج:", ["رقم الماكينة", "التاريخ", "فني الخدمة"], index=["رقم الماكينة", "التاريخ", "فني الخدمة"].index(st.session_state.search_params.get("sort_by", "رقم الماكينة")), key="select_sort_by")
+        st.markdown("---")
+        col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+        with col_btn1:
+            search_clicked = st.button("🔍 **بدء البحث**", type="primary", use_container_width=True, key="main_search_btn")
+        with col_btn2:
+            if st.button("🗑 **مسح الحقول**", use_container_width=True, key="clear_fields"):
+                st.session_state.search_params = {"card_numbers": "", "date_range": "", "tech_names": "", "search_text": "", "exact_match": False, "include_empty": True, "sort_by": "رقم الماكينة", "show_images": True}
+                st.session_state.search_triggered = False
+                st.rerun()
+        with col_btn3:
+            if st.button("📊 **عرض كل البيانات**", use_container_width=True, key="show_all"):
+                st.session_state.search_params = {"card_numbers": "", "date_range": "", "tech_names": "", "search_text": "", "exact_match": False, "include_empty": True, "sort_by": "رقم الماكينة", "show_images": True}
+                st.session_state.search_triggered = True
+                st.rerun()
+    
+    st.session_state.search_params.update({
+        "card_numbers": card_numbers,
+        "date_range": date_input,
+        "tech_names": tech_names,
+        "search_text": search_text,
+        "exact_match": search_mode == "مطابقة كاملة",
+        "include_empty": include_empty,
+        "sort_by": sort_by,
+        "show_images": True
+    })
+    
+    if search_clicked or st.session_state.search_triggered:
+        st.session_state.search_triggered = True
+        search_params = st.session_state.search_params.copy()
+        show_search_params(search_params)
+        show_advanced_search_results(search_params, all_sheets)
 
 def show_search_params(search_params):
-    pass
+    with st.container():
+        st.markdown("### ⚙ معايير البحث المستخدمة")
+        params_display = []
+        if search_params["card_numbers"]:
+            params_display.append(f"**🔢 أرقام الماكينات:** {search_params['card_numbers']}")
+        if search_params["date_range"]:
+            params_display.append(f"**📅 التواريخ:** {search_params['date_range']}")
+        if search_params["tech_names"]:
+            params_display.append(f"**👨‍🔧 فنيو الخدمة:** {search_params['tech_names']}")
+        if search_params["search_text"]:
+            params_display.append(f"**📝 نص البحث:** {search_params['search_text']}")
+        if params_display:
+            st.info(" | ".join(params_display))
+        else:
+            st.info("🔍 **بحث في كل البيانات**")
 
 def show_advanced_search_results(search_params, all_sheets):
-    pass
+    st.markdown("### 📊 نتائج البحث")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    all_results = []
+    total_machines = 0
+    processed_machines = 0
+    for sheet_name in all_sheets.keys():
+        if sheet_name != "ServicePlan" and sheet_name.startswith("Card"):
+            total_machines += 1
+    target_card_numbers = parse_card_numbers(search_params["card_numbers"])
+    target_techs = []
+    if search_params["tech_names"]:
+        techs = search_params["tech_names"].split(',')
+        target_techs = [tech.strip().lower() for tech in techs if tech.strip()]
+    target_dates = []
+    if search_params["date_range"]:
+        dates = search_params["date_range"].split(',')
+        target_dates = [date.strip().lower() for date in dates if date.strip()]
+    search_terms = []
+    if search_params["search_text"]:
+        terms = search_params["search_text"].split(',')
+        search_terms = [term.strip().lower() for term in terms if term.strip()]
+    
+    for sheet_name in all_sheets.keys():
+        if sheet_name == "ServicePlan":
+            continue
+        card_num_match = re.search(r'Card(\d+)', sheet_name)
+        if not card_num_match:
+            continue
+        card_num = int(card_num_match.group(1))
+        if target_card_numbers and card_num not in target_card_numbers:
+            continue
+        processed_machines += 1
+        if total_machines > 0:
+            progress_bar.progress(processed_machines / total_machines)
+        status_text.text(f"🔍 جاري معالجة الماكينة {card_num}...")
+        df = all_sheets[sheet_name].copy()
+        for _, row in df.iterrows():
+            if not check_row_criteria(row, df, card_num, target_techs, target_dates, search_terms, search_params):
+                continue
+            result = extract_row_data(row, df, card_num)
+            if result:
+                all_results.append(result)
+    progress_bar.empty()
+    status_text.empty()
+    if all_results:
+        display_search_results(all_results, search_params)
+    else:
+        st.warning("⚠ لم يتم العثور على نتائج تطابق معايير البحث")
+        st.info("💡 حاول تعديل معايير البحث أو استخدام مصطلحات أوسع")
 
 def display_search_results(results, search_params):
-    # هنا نستخدم display_images المعدلة
-    pass
+    if not results:
+        st.warning("⚠ لا توجد نتائج لعرضها")
+        return
+    result_df = pd.DataFrame(results)
+    if result_df.empty:
+        st.warning("⚠ لا توجد بيانات لعرضها")
+        return
+    display_df = result_df.copy()
+    display_df['Card_Number_Clean'] = pd.to_numeric(display_df['Card Number'], errors='coerce')
+    display_df['Date_Clean'] = pd.to_datetime(display_df['Date'], errors='coerce', dayfirst=True)
+    if search_params["sort_by"] == "التاريخ":
+        display_df = display_df.sort_values(by=['Date_Clean', 'Card_Number_Clean'], ascending=[False, True], na_position='last')
+    elif search_params["sort_by"] == "فني الخدمة":
+        display_df = display_df.sort_values(by=['Servised by', 'Card_Number_Clean', 'Date_Clean'], ascending=[True, True, False], na_position='last')
+    else:
+        display_df = display_df.sort_values(by=['Card_Number_Clean', 'Date_Clean'], ascending=[True, False], na_position='last')
+    display_df['Event_Order'] = display_df.groupby('Card Number').cumcount() + 1
+    display_df['Total_Events'] = display_df.groupby('Card Number')['Card Number'].transform('count')
+    st.markdown("### 📈 إحصائيات النتائج")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📋 عدد النتائج", len(display_df))
+    with col2:
+        unique_machines = display_df["Card Number"].nunique()
+        st.metric("🔢 عدد الماكينات", unique_machines)
+    with col3:
+        if not display_df.empty:
+            machine_counts = display_df.groupby('Card Number').size()
+            multi_event_machines = (machine_counts > 1).sum()
+            st.metric("🔢 مكن متعددة الأحداث", multi_event_machines)
+        else:
+            st.metric("🔢 مكن متعددة الأحداث", 0)
+    with col4:
+        has_images_column = 'Images' in display_df.columns
+        if has_images_column:
+            with_images = display_df[display_df["Images"].notna() & (display_df["Images"] != "-")].shape[0]
+            st.metric("📷 تحتوي على صور", with_images)
+        else:
+            st.metric("📷 تحتوي على صور", 0)
+    st.markdown("---")
+    st.markdown("### 📋 النتائج التفصيلية")
+    display_tabs = st.tabs(["📊 عرض جدولي", "📋 عرض تفصيلي حسب الماكينة", "📷 عرض الصور"])
+    with display_tabs[0]:
+        columns_to_show = ['Card Number', 'Event', 'Correction', 'Servised by', 'Tones', 'Date', 'Event_Order', 'Total_Events']
+        has_images_in_results = any('Images' in result for result in results)
+        if has_images_in_results and 'Images' not in columns_to_show:
+            columns_to_show.append('Images')
+        columns_to_show = [col for col in columns_to_show if col in display_df.columns]
+        st.dataframe(display_df[columns_to_show].style.apply(style_table, axis=1), use_container_width=True, height=500)
+    with display_tabs[1]:
+        unique_machines = sorted(display_df['Card Number'].unique(), key=lambda x: pd.to_numeric(x, errors='coerce') if str(x).isdigit() else float('inf'))
+        for machine in unique_machines:
+            machine_data = display_df[display_df['Card Number'] == machine].copy()
+            machine_data = machine_data.sort_values('Event_Order')
+            with st.expander(f"🔧 الماكينة {machine} - عدد الأحداث: {len(machine_data)}", expanded=len(unique_machines) <= 5):
+                col_stats1, col_stats2, col_stats3 = st.columns(3)
+                with col_stats1:
+                    if not machine_data.empty and 'Date' in machine_data.columns:
+                        first_date = machine_data['Date'].iloc[0]
+                        st.metric("📅 أول حدث", first_date if first_date != "-" else "غير محدد")
+                    else:
+                        st.metric("📅 أول حدث", "-")
+                with col_stats2:
+                    if not machine_data.empty and 'Date' in machine_data.columns:
+                        last_date = machine_data['Date'].iloc[-1]
+                        st.metric("📅 آخر حدث", last_date if last_date != "-" else "غير محدد")
+                    else:
+                        st.metric("📅 آخر حدث", "-")
+                with col_stats3:
+                    if not machine_data.empty and 'Servised by' in machine_data.columns:
+                        tech_count = machine_data['Servised by'].nunique()
+                        st.metric("👨‍🔧 فنيين مختلفين", tech_count)
+                    else:
+                        st.metric("👨‍🔧 فنيين مختلفين", 0)
+                for idx, row in machine_data.iterrows():
+                    st.markdown("---")
+                    col_event1, col_event2 = st.columns([3, 2])
+                    with col_event1:
+                        event_order = row.get('Event_Order', '?')
+                        total_events = row.get('Total_Events', '?')
+                        st.markdown(f"**الحدث #{event_order} من {total_events}**")
+                        if 'Date' in row:
+                            st.markdown(f"**📅 التاريخ:** {row['Date']}")
+                        if 'Event' in row and row['Event'] != '-':
+                            st.markdown(f"**📝 الحدث:** {row['Event']}")
+                        if 'Correction' in row and row['Correction'] != '-':
+                            st.markdown(f"**✏ التصحيح:** {row['Correction']}")
+                    with col_event2:
+                        if 'Servised by' in row and row['Servised by'] != '-':
+                            st.markdown(f"**👨‍🔧 فني الخدمة:** {row['Servised by']}")
+                        if 'Tones' in row and row['Tones'] != '-':
+                            st.markdown(f"**⚖️ الأطنان:** {row['Tones']}")
+                        if 'Images' in row and row['Images'] not in ['-', '', None, 'nan']:
+                            images_str = str(row['Images'])
+                            if images_str.strip():
+                                images_count = len(images_str.split(',')) if images_str else 0
+                                st.markdown(f"**📷 عدد الصور:** {images_count}")
+    with display_tabs[2]:
+        events_with_images = []
+        for result in results:
+            if 'Images' in result and result['Images'] and result['Images'] != "-":
+                events_with_images.append(result)
+        if events_with_images:
+            st.markdown("### 📷 الصور المرفقة بالأحداث")
+            images_df = pd.DataFrame(events_with_images)
+            for idx, row in images_df.iterrows():
+                card_num = row.get('Card Number', 'غير معروف')
+                event_date = row.get('Date', 'غير معروف')
+                event_text = row.get('Event', 'لا يوجد')
+                with st.expander(f"📸 صور للحدث - الماكينة {card_num} - {event_date}", expanded=False):
+                    col_img1, col_img2 = st.columns([2, 3])
+                    with col_img1:
+                        st.markdown("**تفاصيل الحدث:**")
+                        st.markdown(f"**رقم الماكينة:** {card_num}")
+                        st.markdown(f"**التاريخ:** {event_date}")
+                        st.markdown(f"**الحدث:** {event_text[:50]}{'...' if len(event_text) > 50 else ''}")
+                        st.markdown(f"**التصحيح:** {row.get('Correction', '-')}")
+                        st.markdown(f"**فني الخدمة:** {row.get('Servised by', '-')}")
+                    with col_img2:
+                        images_value = row.get('Images', '')
+                        if images_value:
+                            display_images(images_value, "الصور المرفقة")
+        else:
+            st.info("ℹ️ لا توجد أحداث تحتوي على صور في نتائج البحث")
+    st.markdown("---")
+    st.markdown("### 💾 خيارات التصدير")
+    export_col1, export_col2 = st.columns(2)
+    with export_col1:
+        if not result_df.empty:
+            buffer_excel = io.BytesIO()
+            export_df = result_df.copy()
+            export_df['Card_Number_Clean_Export'] = pd.to_numeric(export_df['Card Number'], errors='coerce')
+            export_df['Date_Clean_Export'] = pd.to_datetime(export_df['Date'], errors='coerce', dayfirst=True)
+            export_df = export_df.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], ascending=[True, False], na_position='last')
+            export_df = export_df.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
+            export_df.to_excel(buffer_excel, index=False, engine="openpyxl")
+            st.download_button(label="📊 حفظ كملف Excel", data=buffer_excel.getvalue(), file_name=f"بحث_أحداث_مرتب_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        else:
+            st.info("⚠ لا توجد بيانات للتصدير")
+    with export_col2:
+        if not result_df.empty:
+            buffer_csv = io.BytesIO()
+            export_csv = result_df.copy()
+            export_csv['Card_Number_Clean_Export'] = pd.to_numeric(export_csv['Card Number'], errors='coerce')
+            export_csv['Date_Clean_Export'] = pd.to_datetime(export_csv['Date'], errors='coerce', dayfirst=True)
+            export_csv = export_csv.sort_values(by=['Card_Number_Clean_Export', 'Date_Clean_Export'], ascending=[True, False], na_position='last')
+            export_csv = export_csv.drop(['Card_Number_Clean_Export', 'Date_Clean_Export'], axis=1, errors='ignore')
+            export_csv.to_csv(buffer_csv, index=False, encoding='utf-8-sig')
+            st.download_button(label="📄 حفظ كملف CSV", data=buffer_csv.getvalue(), file_name=f"بحث_أحداث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+        else:
+            st.info("⚠ لا توجد بيانات للتصدير")
 
 def check_row_criteria(row, df, card_num, target_techs, target_dates, search_terms, search_params):
-    pass
+    if target_techs:
+        row_tech = get_servised_by_value(row).lower()
+        if row_tech == "-" and not search_params["include_empty"]:
+            return False
+        tech_match = False
+        if row_tech != "-":
+            for tech in target_techs:
+                if search_params["exact_match"]:
+                    if tech == row_tech:
+                        tech_match = True
+                        break
+                else:
+                    if tech in row_tech:
+                        tech_match = True
+                        break
+        if not tech_match:
+            return False
+    if target_dates:
+        row_date = str(row.get("Date", "")).strip().lower() if pd.notna(row.get("Date")) else ""
+        if not row_date and not search_params["include_empty"]:
+            return False
+        date_match = False
+        if row_date:
+            for date_term in target_dates:
+                if search_params["exact_match"]:
+                    if date_term == row_date:
+                        date_match = True
+                        break
+                else:
+                    if date_term in row_date:
+                        date_match = True
+                        break
+        if not date_match:
+            return False
+    if search_terms:
+        row_event, row_correction = extract_event_correction(row, df)
+        row_event_lower = row_event.lower()
+        row_correction_lower = row_correction.lower()
+        if not row_event and not row_correction and not search_params["include_empty"]:
+            return False
+        text_match = False
+        combined_text = f"{row_event_lower} {row_correction_lower}"
+        for term in search_terms:
+            if search_params["exact_match"]:
+                if term == row_event_lower or term == row_correction_lower:
+                    text_match = True
+                    break
+            else:
+                if term in combined_text:
+                    text_match = True
+                    break
+        if not text_match:
+            return False
+    return True
 
 def extract_event_correction(row, df):
-    pass
+    event_value = "-"
+    correction_value = "-"
+    for col in df.columns:
+        col_normalized = normalize_name(col)
+        if "event" in col_normalized or "الحدث" in col_normalized:
+            if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+                event_value = str(row[col]).strip()
+        if "correction" in col_normalized or "تصحيح" in col_normalized:
+            if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+                correction_value = str(row[col]).strip()
+    return event_value, correction_value
 
 def extract_row_data(row, df, card_num):
-    pass
+    card_num_value = str(row.get("card", "")).strip() if pd.notna(row.get("card")) else str(card_num)
+    date = str(row.get("Date", "")).strip() if pd.notna(row.get("Date")) else "-"
+    tones = str(row.get("Tones", "")).strip() if pd.notna(row.get("Tones")) else "-"
+    event_value, correction_value = extract_event_correction(row, df)
+    images_value = get_images_value(row)
+    if (event_value == "-" and correction_value == "-" and date == "-" and tones == "-" and not images_value):
+        return None
+    servised_by_value = get_servised_by_value(row)
+    result = {"Card Number": card_num_value, "Event": event_value, "Correction": correction_value, "Servised by": servised_by_value, "Tones": tones, "Date": date}
+    if images_value and images_value.strip():
+        result["Images"] = images_value.strip()
+    return result
 
 def parse_card_numbers(card_numbers_str):
-    pass
+    if not card_numbers_str:
+        return set()
+    numbers = set()
+    try:
+        parts = card_numbers_str.split(',')
+        for part in parts:
+            part = part.strip()
+            if '-' in part:
+                try:
+                    start_str, end_str = part.split('-')
+                    start = int(start_str.strip())
+                    end = int(end_str.strip())
+                    numbers.update(range(start, end + 1))
+                except:
+                    continue
+            else:
+                try:
+                    num = int(part)
+                    numbers.add(num)
+                except:
+                    continue
+    except:
+        return set()
+    return numbers
 
 # -------------------------------
 # دوال إضافة وتعديل الأحداث مع رفع الصور إلى GitHub
@@ -612,7 +1329,6 @@ def add_new_event(sheets_edit):
         new_row["card"] = card_num.strip()
         if event_date.strip():
             new_row["Date"] = event_date.strip()
-        # البحث عن أعمدة الحدث والتصحيح
         event_columns = [col for col in df.columns if normalize_name(col) in ["event", "events", "الحدث", "الأحداث"]]
         if event_columns and event_text.strip():
             new_row[event_columns[0]] = event_text.strip()
@@ -623,7 +1339,6 @@ def add_new_event(sheets_edit):
             new_row[correction_columns[0]] = correction_text.strip()
         elif not correction_columns and correction_text.strip():
             new_row["Correction"] = correction_text.strip()
-        # البحث عن عمود فني الخدمة
         servised_col = None
         servised_columns = [col for col in df.columns if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]]
         if servised_columns:
@@ -637,7 +1352,6 @@ def add_new_event(sheets_edit):
                 servised_col = "Servised by"
         if serviced_by.strip():
             new_row[servised_col] = serviced_by.strip()
-        # تخزين روابط الصور (مفصولة بفواصل)
         if saved_urls:
             images_col = None
             images_columns = [col for col in df.columns if normalize_name(col) in ["images", "pictures", "attachments", "صور", "مرفقات"]]
@@ -647,8 +1361,7 @@ def add_new_event(sheets_edit):
                 images_col = "Images"
                 if images_col not in df.columns:
                     df[images_col] = ""
-            # تخزين الروابط كسلسلة مفصولة بفواصل (بدون مسافات إضافية)
-            new_row[images_col] = ",".join(saved_urls)  # بدون مسافات
+            new_row[images_col] = ",".join(saved_urls)
         new_row_df = pd.DataFrame([new_row]).astype(str)
         df_new = pd.concat([df, new_row_df], ignore_index=True)
         sheets_edit[sheet_name] = df_new.astype(object)
@@ -725,7 +1438,6 @@ def edit_events_and_corrections(sheets_edit):
             if existing_images_str is not None and pd.notna(existing_images_str):
                 existing_images_str = str(existing_images_str).strip()
                 if existing_images_str and existing_images_str != "-":
-                    # تقسيم باستخدام الفاصلة (قد تكون هناك مسافات)
                     existing_images = [url.strip() for url in existing_images_str.split(",") if url.strip()]
         if existing_images:
             st.markdown("**الصور الحالية (روابط GitHub):**")
@@ -761,7 +1473,7 @@ def edit_events_and_corrections(sheets_edit):
                 df.at[row_index, servised_col] = new_serviced_by.strip()
             if images_col:
                 if all_images:
-                    df.at[row_index, images_col] = ",".join(all_images)  # بدون مسافات
+                    df.at[row_index, images_col] = ",".join(all_images)
                 else:
                     df.at[row_index, images_col] = ""
             elif all_images:
@@ -942,9 +1654,7 @@ with tabs[0]:
         if st.button("عرض حالة السيرفيس", key="show_service"):
             st.session_state["show_service_results"] = True
         if st.session_state.get("show_service_results", False):
-            # استدعاء دالة فحص السيرفيس (يجب إكمالها في الكود النهائي)
-            st.info("سيتم عرض النتائج هنا بعد إضافة دالة check_service_status كاملة")
-            # check_service_status(card_num, current_tons, all_sheets)
+            check_service_status(card_num, current_tons, all_sheets)
 
 with tabs[1]:
     st.header("📋 فحص الإيفينت والكوريكشن")
