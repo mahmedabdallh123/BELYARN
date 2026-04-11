@@ -134,19 +134,21 @@ def display_images(image_value, caption="الصور المرفقة"):
     if not image_value:
         return
     st.markdown(f"**{caption}:**")
-    # إذا كانت القيمة نصية، نحاول استخراج الروابط
-    if isinstance(image_value, str):
-        # إذا كانت القيمة تحتوي على فاصلة، نقسمها
-        if ',' in image_value:
-            urls = [url.strip() for url in image_value.split(',') if url.strip()]
-        # إذا كانت تحتوي على مسافات فقط، نعتبرها رابط واحد
-        else:
-            urls = [image_value.strip()]
-    else:
-        urls = [image_value]
     
-    # تصفية الروابط الفارغة
-    urls = [url for url in urls if url and url != "-"]
+    # تحويل المدخلات إلى قائمة من السلاسل النصية
+    if isinstance(image_value, str):
+        if ',' in image_value:
+            urls = [url.strip() for url in image_value.split(',') if url and url.strip()]
+        else:
+            urls = [image_value.strip()] if image_value.strip() else []
+    elif isinstance(image_value, list):
+        urls = [str(url).strip() for url in image_value if url and str(url).strip()]
+    else:
+        # أي نوع آخر (رقم، None، إلخ) نحوله إلى نص أو نتجاهله
+        urls = [str(image_value).strip()] if image_value and str(image_value).strip() else []
+    
+    # تصفية الروابط غير الصالحة
+    urls = [url for url in urls if url and url != "-" and url.lower() not in ["nan", "none", "null"]]
     if not urls:
         st.info("ℹ️ لا توجد صور لعرضها.")
         return
