@@ -27,8 +27,8 @@ APP_CONFIG = {
     # إعدادات GitHub
     "REPO_NAME": "mahmedabdallh123/BELYARN",
     "BRANCH": "main",
-    "FILE_PATH": "l9.xlsx",
-    "LOCAL_FILE": "l9.xlsx",
+    "FILE_PATH": "l4.xlsx",
+    "LOCAL_FILE": "l4.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 2,
