@@ -6,9 +6,9 @@ import io
 import requests
 import shutil
 import re
+import traceback
 from datetime import datetime, timedelta
 from base64 import b64decode
-import traceback  # لالتقاط التفاصيل الكاملة للخطأ
 
 try:
     from github import Github
@@ -38,7 +38,7 @@ MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
 # -------------------------------
-# دوال المستخدمين والجلسات (بدون تعديل)
+# دوال المستخدمين والجلسات
 # -------------------------------
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -202,10 +202,9 @@ def fetch_from_github_requests():
         with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
             shutil.copyfileobj(response.raw, f)
         st.cache_data.clear()
-        return True
+        return True, None
     except Exception as e:
-        st.error(f"⚠ فشل التحديث من GitHub: {str(e)}")
-        return False
+        return False, str(e)
 
 def fetch_from_github_api():
     if not GITHUB_AVAILABLE:
@@ -221,10 +220,9 @@ def fetch_from_github_api():
         with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
             f.write(content)
         st.cache_data.clear()
-        return True
+        return True, None
     except Exception as e:
-        st.error(f"⚠ فشل التحميل عبر API: {str(e)}")
-        return False
+        return False, str(e)
 
 # -------------------------------
 # تحميل الشيتات
@@ -257,11 +255,15 @@ def load_sheets_for_edit():
         st.error(f"❌ خطأ في تحميل الشيتات للتحرير: {e}")
         return None
 
-# -------------------------------
-# دالة الحفظ الأساسية (محلي + GitHub) مع تقارير أخطاء مفصلة
-# -------------------------------
+# -----------------------------------------------
+# دوال الحفظ مع إرجاع رسائل خطأ مفصلة
+# -----------------------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
-    """حفظ الملف محلياً ومحاولة رفعه إلى GitHub مع عرض كل الأخطاء"""
+    """
+    تعيد tuple: (new_sheets_or_None, error_message)
+    """
+    error_messages = []
+    
     # 1. حفظ محلي
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
@@ -269,36 +271,34 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
                 try:
                     sh.to_excel(writer, sheet_name=name, index=False)
                 except Exception as inner_e:
-                    st.warning(f"⚠ مشكلة في كتابة شيت {name}: {inner_e} - سيتم التحويل إلى object")
+                    st.warning(f"⚠ تحويل شيت {name} إلى object بسبب: {inner_e}")
                     sh.astype(object).to_excel(writer, sheet_name=name, index=False)
-        st.success("✅ تم الحفظ محلياً بنجاح.")
     except Exception as e:
-        st.error(f"❌ فشل الحفظ المحلي: {str(e)}")
-        st.exception(e)  # يعرض تفاصيل الخطأ كاملة
-        return None
-
+        error_msg = f"❌ فشل الحفظ المحلي:\n{str(e)}\n\n{traceback.format_exc()}"
+        return (None, error_msg)
+    
     # 2. مسح الكاش
     try:
         st.cache_data.clear()
     except:
         pass
-
-    # 3. رفع إلى GitHub (إذا توفر token)
+    
+    # 3. رفع إلى GitHub
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
-        st.warning("⚠ لا يوجد GitHub token في secrets. تم الحفظ محلياً فقط.")
-        return load_sheets_for_edit()
-
+        error_msg = "⚠⚠⚠ لا يوجد GitHub token في secrets. تم الحفظ محلياً فقط، ولكن لم يتم الرفع إلى GitHub.\n\nلحل المشكلة: أضف token في ملف secrets (Streamlit Cloud -> Settings -> Secrets)."
+        return (load_sheets_for_edit(), error_msg)
+    
     if not GITHUB_AVAILABLE:
-        st.warning("⚠ PyGithub غير مثبت. تم الحفظ محلياً فقط.")
-        return load_sheets_for_edit()
-
+        error_msg = "⚠⚠⚠ PyGithub غير مثبت. تم الحفظ محلياً فقط.\n\nلحل المشكلة: قم بتثبيته باستخدام: pip install PyGithub"
+        return (load_sheets_for_edit(), error_msg)
+    
     try:
         g = Github(token)
         repo = g.get_repo(APP_CONFIG["REPO_NAME"])
         with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
             content = f.read()
-
+        
         try:
             contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
             result = repo.update_file(
@@ -308,10 +308,8 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
                 sha=contents.sha,
                 branch=APP_CONFIG["BRANCH"]
             )
-            st.success(f"✅ تم الرفع إلى GitHub بنجاح: {commit_message}")
-            return load_sheets_for_edit()
+            return (load_sheets_for_edit(), None)
         except Exception as e:
-            # محاولة إنشاء الملف إذا لم يكن موجوداً
             try:
                 result = repo.create_file(
                     path=APP_CONFIG["FILE_PATH"],
@@ -319,31 +317,22 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
                     content=content,
                     branch=APP_CONFIG["BRANCH"]
                 )
-                st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
-                return load_sheets_for_edit()
+                return (load_sheets_for_edit(), None)
             except Exception as create_err:
-                st.error(f"❌ فشل إنشاء ملف على GitHub: {str(create_err)}")
-                st.exception(create_err)
-                return None
+                error_msg = f"❌❌❌ فشل إنشاء/تحديث الملف على GitHub:\n{str(create_err)}\n\n{traceback.format_exc()}"
+                return (None, error_msg)
     except Exception as e:
-        st.error(f"❌ فشل الاتصال بـ GitHub: {str(e)}")
-        st.exception(e)
-        return None
+        error_msg = f"❌❌❌ فشل الاتصال بـ GitHub:\n{str(e)}\n\n{traceback.format_exc()}"
+        return (None, error_msg)
 
 def auto_save_to_github(sheets_dict, operation_description):
-    """دالة الحفظ مع رسائل واضحة"""
     username = st.session_state.get("username", "unknown")
     commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    result = save_local_excel_and_push(sheets_dict, commit_message)
-    if result is not None:
-        st.toast("✅ تم حفظ جميع التغييرات", icon="✅")
-        return result
-    else:
-        st.error("❌ فشل الحفظ النهائي. راجع الأخطاء أعلاه.")
-        return sheets_dict  # نعيد البيانات القديمة لتجنب فقدانها
+    new_sheets, error = save_local_excel_and_push(sheets_dict, commit_message)
+    return (new_sheets, error)
 
 # -------------------------------
-# دوال فحص الماكينة (كما هي)
+# دوال مساعدة للواجهة والفحص
 # -------------------------------
 def normalize_name(s):
     if s is None: return ""
@@ -381,9 +370,9 @@ def get_user_permissions(user_role, user_permissions):
     if "all" in user_permissions:
         return {"can_view": True, "can_edit": True, "can_manage_users": False, "can_see_tech_support": False}
     elif "edit" in user_permissions:
-        return {"can_view": True, "can_edit": True, "can_manage_users": False, "can_see_tech_support": False}
+        return {"can_view": True, "can_edit": True}
     else:
-        return {"can_view": True, "can_edit": False, "can_manage_users": False, "can_see_tech_support": False}
+        return {"can_view": True, "can_edit": False}
 
 def check_machine_status(card_num, current_tons, all_sheets):
     if not all_sheets:
@@ -504,8 +493,13 @@ with st.sidebar:
     st.markdown("---")
     st.write("🔧 أدوات:")
     if st.button("🔄 تحديث الملف من GitHub"):
-        if fetch_from_github_requests():
-            st.rerun()
+        with st.spinner("جاري التحميل..."):
+            success, err = fetch_from_github_requests()
+            if success:
+                st.success("تم التحديث بنجاح")
+                st.rerun()
+            else:
+                st.error(f"فشل التحديث: {err}")
     if st.button("🗑 مسح الكاش"):
         st.cache_data.clear()
         st.rerun()
@@ -522,12 +516,12 @@ user_role = st.session_state.get("user_role", "viewer")
 user_permissions = st.session_state.get("user_permissions", ["view"])
 permissions = get_user_permissions(user_role, user_permissions)
 
-if permissions["can_edit"]:
+if permissions.get("can_edit", False):
     tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
 else:
     tabs = st.tabs(["📊 عرض وفحص الماكينات"])
 
-# تبويب العرض والفحص
+# تبويب عرض وفحص الماكينات
 with tabs[0]:
     st.header("📊 عرض وفحص الماكينات")
     if all_sheets is None:
@@ -543,38 +537,46 @@ with tabs[0]:
         if st.session_state.get("show_results", False):
             check_machine_status(card_num, current_tons, all_sheets)
 
-# تبويب التعديل (مع زر حفظ يدوي)
-if permissions["can_edit"] and len(tabs) > 1:
+# تبويب تعديل البيانات (مع عرض ثابت للخطأ)
+if permissions.get("can_edit", False) and len(tabs) > 1:
     with tabs[1]:
         st.header("🛠 تعديل وإدارة البيانات")
+        
+        # مكان ثابت لعرض الأخطاء (لن يختفي)
+        error_container = st.empty()
+        
         if sheets_edit is None:
-            st.warning("❗ لا يمكن تحميل البيانات. تأكد من وجود الملف المحلي.")
+            st.error("لا يمكن تحميل البيانات. تأكد من وجود الملف المحلي.")
         else:
-            # نختار الشيت
             sheet_names = list(sheets_edit.keys())
             selected_sheet = st.selectbox("اختر الشيت", sheet_names, key="edit_sheet_select")
             current_df = sheets_edit[selected_sheet].astype(str)
-
+            
             st.markdown("### ✏ قم بتعديل البيانات مباشرة في الجدول")
             edited_df = st.data_editor(current_df, num_rows="dynamic", use_container_width=True, key="data_editor_main")
-
-            # زر حفظ يدوي
-            col_save1, col_save2 = st.columns([1, 4])
-            with col_save1:
+            
+            col1, col2 = st.columns([1, 4])
+            with col1:
                 if st.button("💾 حفظ التغييرات الآن", type="primary", use_container_width=True):
-                    if not edited_df.equals(current_df):
-                        sheets_edit[selected_sheet] = edited_df.astype(object)
-                        new_sheets = auto_save_to_github(sheets_edit, f"تعديل يدوي في شيت {selected_sheet}")
-                        if new_sheets is not None:
-                            sheets_edit = new_sheets
-                            st.success("✅ تم الحفظ بنجاح، يمكنك متابعة التعديل")
-                            st.rerun()
+                    if edited_df.equals(current_df):
+                        st.info("ℹ️ لا توجد تغييرات جديدة للحفظ.")
                     else:
-                        st.info("لا توجد تغييرات جديدة للحفظ.")
-            with col_save2:
-                st.caption("اضغط حفظ بعد الانتهاء من التعديلات")
-
-            # باقي العمليات (إضافة صف، عمود، حذف صف) بنفس الطريقة مع حفظ يدوي
+                        sheets_edit[selected_sheet] = edited_df.astype(object)
+                        new_sheets, error = auto_save_to_github(sheets_edit, f"تعديل يدوي في شيت {selected_sheet}")
+                        if error:
+                            # عرض الخطأ بشكل ثابت وواضح
+                            error_container.error(f"⚠⚠⚠ فشل الحفظ ⚠⚠⚠\n\n{error}")
+                            st.session_state.save_error = error  # نخزنه في session_state ليبقى حتى بعد إعادة التشغيل
+                        else:
+                            sheets_edit = new_sheets
+                            error_container.success("✅ تم الحفظ بنجاح ورفعه إلى GitHub")
+                            st.rerun()
+            
+            # إذا كان هناك خطأ مخزّن سابقاً، أظهره
+            if "save_error" in st.session_state and st.session_state.save_error:
+                error_container.error(f"⚠⚠⚠ خطأ سابق في الحفظ ⚠⚠⚠\n\n{st.session_state.save_error}")
+            
+            # باقي العمليات (إضافة صف، عمود، حذف) بنفس المنطق مع error_container
             st.markdown("---")
             with st.expander("➕ إضافة صف جديد"):
                 df_add = sheets_edit[selected_sheet].astype(str).reset_index(drop=True)
@@ -585,7 +587,8 @@ if permissions["can_edit"] and len(tabs) > 1:
                         new_data[col] = st.text_input(f"{col}", key=f"add_{selected_sheet}_{col}")
                 if st.button("💾 إضافة الصف وحفظ", key="add_row_btn"):
                     new_row_df = pd.DataFrame([new_data]).astype(str)
-                    min_col, max_col, card_col = None, None, None
+                    # إيجاد أعمدة Min/Max
+                    min_col = max_col = card_col = None
                     for c in df_add.columns:
                         c_low = c.strip().lower()
                         if c_low in ("min_tones", "min_tone", "min tones", "min"):
@@ -595,12 +598,11 @@ if permissions["can_edit"] and len(tabs) > 1:
                         if c_low in ("card", "machine", "machine_no", "machine id"):
                             card_col = c
                     if not min_col or not max_col:
-                        st.error("⚠ لم يتم العثور على أعمدة Min_Tones / Max_Tones.")
+                        error_container.error("⚠ لم يتم العثور على أعمدة Min_Tones / Max_Tones في هذا الشيت. لا يمكن إضافة الصف.")
                     else:
                         new_min_raw = str(new_data.get(min_col, "")).strip()
                         new_max_raw = str(new_data.get(max_col, "")).strip()
                         insert_pos = len(df_add)
-                        # محاولة ترتيب حسب Min_Tones
                         try:
                             df_add["_min_num"] = pd.to_numeric(df_add[min_col], errors='coerce').fillna(-1)
                             new_min_num = float(new_min_raw) if new_min_raw.replace('.', '', 1).isdigit() else -1
@@ -612,11 +614,14 @@ if permissions["can_edit"] and len(tabs) > 1:
                         df_bottom = df_add.iloc[insert_pos:].reset_index(drop=True)
                         df_new = pd.concat([df_top, new_row_df.reset_index(drop=True), df_bottom], ignore_index=True)
                         sheets_edit[selected_sheet] = df_new.astype(object)
-                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف في {selected_sheet} (النطاق {new_min_raw}-{new_max_raw})")
-                        if new_sheets is not None:
+                        new_sheets, error = auto_save_to_github(sheets_edit, f"إضافة صف في {selected_sheet}")
+                        if error:
+                            error_container.error(f"⚠⚠⚠ فشل إضافة الصف: {error}")
+                        else:
                             sheets_edit = new_sheets
+                            st.success("تمت الإضافة والحفظ بنجاح")
                             st.rerun()
-
+            
             with st.expander("🆕 إضافة عمود جديد"):
                 new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
                 default_value = st.text_input("القيمة الافتراضية:", key="default_value")
@@ -625,13 +630,16 @@ if permissions["can_edit"] and len(tabs) > 1:
                         df_col = sheets_edit[selected_sheet].astype(str)
                         df_col[new_col_name] = default_value
                         sheets_edit[selected_sheet] = df_col.astype(object)
-                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود {new_col_name} إلى {selected_sheet}")
-                        if new_sheets is not None:
+                        new_sheets, error = auto_save_to_github(sheets_edit, f"إضافة عمود {new_col_name}")
+                        if error:
+                            error_container.error(f"⚠⚠⚠ فشل إضافة العمود: {error}")
+                        else:
                             sheets_edit = new_sheets
+                            st.success("تمت الإضافة والحفظ بنجاح")
                             st.rerun()
                     else:
-                        st.warning("الرجاء إدخال اسم العمود.")
-
+                        error_container.warning("الرجاء إدخال اسم العمود.")
+            
             with st.expander("🗑 حذف صفوف"):
                 df_del = sheets_edit[selected_sheet].astype(str).reset_index(drop=True)
                 st.dataframe(df_del, use_container_width=True)
@@ -645,11 +653,14 @@ if permissions["can_edit"] and len(tabs) > 1:
                             if rows_list:
                                 df_new = df_del.drop(rows_list).reset_index(drop=True)
                                 sheets_edit[selected_sheet] = df_new.astype(object)
-                                new_sheets = auto_save_to_github(sheets_edit, f"حذف صفوف {rows_list} من {selected_sheet}")
-                                if new_sheets is not None:
+                                new_sheets, error = auto_save_to_github(sheets_edit, f"حذف صفوف {rows_list}")
+                                if error:
+                                    error_container.error(f"⚠⚠⚠ فشل حذف الصفوف: {error}")
+                                else:
                                     sheets_edit = new_sheets
+                                    st.success("تم الحذف والحفظ بنجاح")
                                     st.rerun()
                             else:
-                                st.warning("لم يتم العثور على صفوف صالحة للحذف.")
+                                error_container.warning("لم يتم العثور على صفوف صالحة للحذف.")
                         except Exception as e:
-                            st.error(f"خطأ: {e}")
+                            error_container.error(f"خطأ أثناء الحذف: {str(e)}")
