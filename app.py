@@ -61,8 +61,8 @@ IMAGES_FOLDER = APP_CONFIG["IMAGES_FOLDER"]
 
 # إنشاء رابط GitHub تلقائياً من الإعدادات
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
-GITHUB_USERS_URL = "https://raw.githubusercontent.com/mahmedabdallh123/Elqds/refs/heads/main/users.json"
-GITHUB_REPO_USERS = "mahmedabdallh123/Elqds"
+GITHUB_USERS_URL = "https://raw.githubusercontent.com/mahmedabdallh123/BELYARN/refs/heads/main/users.json"
+GITHUB_REPO_USERS = "mahmedabdallh123/BELYARN"
 
 # -------------------------------
 # 🧩 دوال مساعدة للصور
