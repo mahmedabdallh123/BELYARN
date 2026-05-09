@@ -25,10 +25,10 @@ APP_CONFIG = {
     "APP_ICON": "🏭",
     
     # إعدادات GitHub
-    "REPO_NAME": "mahmedabdallh123/log",
+    "REPO_NAME": "mahmedabdallh123/BELYARN",
     "BRANCH": "main",
-    "FILE_PATH": "Machine_Service_Lookup.xlsx",
-    "LOCAL_FILE": "Machine_Service_Lookup.xlsx",
+    "FILE_PATH": "l4.xlsx",
+    "LOCAL_FILE": "l4.xlsx",
     
     # إعدادات الأمان
     "MAX_ACTIVE_USERS": 2,
