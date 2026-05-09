@@ -9,7 +9,6 @@ import re
 from datetime import datetime, timedelta
 from base64 import b64decode
 
-# محاولة استيراد PyGithub (لرفع التعديلات)
 try:
     from github import Github
     GITHUB_AVAILABLE = True
@@ -17,7 +16,7 @@ except Exception:
     GITHUB_AVAILABLE = False
 
 # ===============================
-# ⚙ إعدادات التطبيق - يمكن تعديلها بسهولة
+# ⚙ إعدادات التطبيق
 # ===============================
 APP_CONFIG = {
     "APP_TITLE": "CMMS - BELYARN",
@@ -27,13 +26,9 @@ APP_CONFIG = {
     "FILE_PATH": "l4.xlsx",
     "LOCAL_FILE": "l4.xlsx",
     "MAX_ACTIVE_USERS": 2,
-    "SESSION_DURATION_MINUTES": 15,
-    "CUSTOM_TABS": ["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات"]
+    "SESSION_DURATION_MINUTES": 15
 }
 
-# ===============================
-# 🗂 إعدادات الملفات
-# ===============================
 USERS_FILE = "users.json"
 STATE_FILE = "state.json"
 SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
@@ -42,7 +37,7 @@ MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
 # -------------------------------
-# 🧩 دوال مساعدة للملفات والحالة
+# 🧩 دوال المستخدمين والجلسات
 # -------------------------------
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -52,7 +47,7 @@ def load_users():
             "viewer": {"password": "viewer123", "role": "viewer", "permissions": ["view"]}
         }
         with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_users, f, indent=4, ensure_ascii=False)
+            json.dump(default_users, f, indent=4)
         return default_users
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
@@ -63,7 +58,7 @@ def load_users():
 def save_users(users):
     try:
         with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(users, f, indent=4, ensure_ascii=False)
+            json.dump(users, f, indent=4)
         return True
     except:
         return False
@@ -128,7 +123,7 @@ def logout_action():
     st.rerun()
 
 # -------------------------------
-# 🔐 تسجيل الدخول المبسط
+# 🔐 تسجيل الدخول
 # -------------------------------
 def login_ui():
     users = load_users()
@@ -163,7 +158,7 @@ def login_ui():
                 st.session_state.username = username_input
                 st.session_state.user_role = users[username_input].get("role", "viewer")
                 st.session_state.user_permissions = users[username_input].get("permissions", ["view"])
-                st.success(f"✅ تم تسجيل الدخول: {username_input}")
+                st.success(f"✅ تم تسجيل الدخول: {username_input} ({st.session_state.user_role})")
                 st.rerun()
             else:
                 st.error("❌ كلمة المرور غير صحيحة.")
@@ -287,7 +282,7 @@ def auto_save_to_github(sheets_dict, operation_description):
         return sheets_dict
 
 # -------------------------------
-# 🧰 دوال مساعدة للنصوص والألوان
+# 🧰 دوال مساعدة للفحص
 # -------------------------------
 def normalize_name(s):
     if s is None: return ""
@@ -325,7 +320,7 @@ def get_user_permissions(user_role, user_permissions):
         return {"can_view": True, "can_edit": False}
 
 # -------------------------------
-# 🖥 فحص الماكينة (الخدمات فقط – بدون Event/Correction/Tones/Date)
+# 🖥 فحص الماكينة (الخدمات فقط)
 # -------------------------------
 def check_machine_status(card_num, current_tons, all_sheets):
     if not all_sheets or "ServicePlan" not in all_sheets:
@@ -340,7 +335,6 @@ def check_machine_status(card_num, current_tons, all_sheets):
 
     card_df = all_sheets[card_sheet_name]
 
-    # نطاق العرض
     if "view_option" not in st.session_state:
         st.session_state.view_option = "الشريحة الحالية فقط"
 
@@ -390,7 +384,6 @@ def check_machine_status(card_num, current_tons, all_sheets):
         if not matching_rows.empty:
             for _, row in matching_rows.iterrows():
                 done_services_set = set()
-                # استبعاد أعمدة البيانات الوصفية
                 metadata_columns = {"card", "tones", "min_tones", "max_tones", "date", "other", "servised by", "event", "correction"}
                 all_cols = set(card_df.columns)
                 service_cols = [c for c in all_cols if normalize_name(c) not in metadata_columns]
@@ -422,6 +415,18 @@ def check_machine_status(card_num, current_tons, all_sheets):
             })
 
     result_df = pd.DataFrame(all_results).dropna(how="all").reset_index(drop=True)
+
+    # إخفاء الصفوف التي ليس فيها أي خدمات
+    result_df = result_df[
+        ~((result_df["Service Needed"] == "-") &
+          (result_df["Service Done"] == "-") &
+          (result_df["Service Didn't Done"] == "-"))
+    ]
+
+    if result_df.empty:
+        st.info("ℹ️ لا توجد خدمات مطلوبة أو منجزة في النطاق المحدد.")
+        return
+
     st.markdown("### 📋 نتائج فحص الخدمات")
     st.dataframe(result_df.style.apply(style_table, axis=1), use_container_width=True)
 
@@ -435,11 +440,10 @@ def check_machine_status(card_num, current_tons, all_sheets):
     )
 
 # ===============================
-# 🖥 الواجهة الرئيسية
+# 🖥 الواجهة الرئيسية (تبويبان)
 # ===============================
 st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
-# الشريط الجانبي لتسجيل الدخول والأدوات
 with st.sidebar:
     st.header("👤 الجلسة")
     if not st.session_state.get("logged_in"):
@@ -480,17 +484,15 @@ permissions = get_user_permissions(
 
 # إنشاء التبويبات حسب الصلاحيات
 if permissions["can_edit"]:
-    tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
+    tabs = st.tabs(["📊 عرض وفحص الماكينات", "🛠 تعديل وإدارة البيانات"])
 else:
-    tabs = st.tabs([APP_CONFIG["CUSTOM_TABS"][0]])  # فقط عرض الفحص
+    tabs = st.tabs(["📊 عرض وفحص الماكينات"])
 
-# -------------------------------
 # تبويب عرض وفحص الماكينات
-# -------------------------------
 with tabs[0]:
     st.header("📊 عرض وفحص الماكينات")
     if all_sheets is None:
-        st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي.")
+        st.warning("❗ الملف المحلي غير موجود. استخدم زر التحديث في الشريط الجانبي لتحميل الملف من GitHub.")
     else:
         col1, col2 = st.columns(2)
         with col1:
@@ -502,9 +504,7 @@ with tabs[0]:
         if st.session_state.get("show_results", False):
             check_machine_status(card_num, current_tons, all_sheets)
 
-# -------------------------------
-# تبويب تعديل وإدارة البيانات (للمستخدمين الذين لديهم صلاحية التحرير)
-# -------------------------------
+# تبويب تعديل وإدارة البيانات (للمستخدمين المصرح لهم)
 if permissions["can_edit"] and len(tabs) > 1:
     with tabs[1]:
         st.header("🛠 تعديل وإدارة البيانات")
