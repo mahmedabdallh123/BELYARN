@@ -556,9 +556,9 @@ def check_machine_status(card_num, current_tons, all_sheets):
                 # تحديد الأعمدة التي تحتوي على خدمات منجزة
                 metadata_columns = {
                     "card", "Tones", "Min_Tones", "Max_Tones", "Date", 
-                    "Other", "Servised by", "Event", "Correction",
+                    "Other", "Servised by",
                     "Card", "TONES", "MIN_TONES", "MAX_TONES", "DATE",
-                    "OTHER", "EVENT", "CORRECTION", "SERVISED BY",
+                    "OTHER", "SERVISED BY",
                     "servised by", "Servised By", 
                     "Serviced by", "Service by", "Serviced By", "Service By",
                     "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"
