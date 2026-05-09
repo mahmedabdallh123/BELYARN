@@ -41,7 +41,7 @@ SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 IMAGES_FOLDER = APP_CONFIG["IMAGES_FOLDER"]
 
-GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
+GITHUB_EXCEL_URL = f"https://raw.githubusercontent.com/{APP_CONFIG['REPO_NAME']}/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{APP_CONFIG['REPO_NAME']}/{APP_CONFIG['BRANCH']}/"
 
 # -------------------------------
@@ -336,19 +336,22 @@ def login_ui():
         return True
 
 def fetch_from_github_requests():
-    try:
-        response = requests.get(GITHUB_EXCEL_URL, stream=True, timeout=15)
-        response.raise_for_status()
-        with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
-            shutil.copyfileobj(response.raw, f)
+    urls_to_try = [
+        f"https://raw.githubusercontent.com/{APP_CONFIG['REPO_NAME']}/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}",
+        f"https://raw.githubusercontent.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
+    ]
+    for url in urls_to_try:
         try:
+            response = requests.get(url, stream=True, timeout=15)
+            response.raise_for_status()
+            with open(APP_CONFIG["LOCAL_FILE"], "wb") as f:
+                shutil.copyfileobj(response.raw, f)
             st.cache_data.clear()
-        except:
-            pass
-        return True
-    except Exception as e:
-        st.error(f"⚠ فشل التحديث من GitHub: {e}")
-        return False
+            return True
+        except Exception as e:
+            continue
+    st.error(f"⚠ فشل التحديث من GitHub بعد محاولة جميع الروابط.")
+    return False
 
 def fetch_from_github_api():
     if not GITHUB_AVAILABLE:
