@@ -23,7 +23,7 @@ APP_CONFIG = {
     "APP_TITLE": "CMMS - BELYARN",
     "APP_ICON": "🏭",
     "REPO_NAME": "mahmedabdallh123/BELYARN",
-    "BRANCH": "main",
+    "BRANCH": "master",
     "FILE_PATH": "l4.xlsx",
     "LOCAL_FILE": "l4.xlsx",
     "MAX_ACTIVE_USERS": 2,
