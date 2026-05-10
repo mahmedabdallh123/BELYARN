@@ -23,7 +23,7 @@ APP_CONFIG = {
     "APP_TITLE": "CMMS - BELYARN",
     "APP_ICON": "🏭",
     "REPO_NAME": "mahmedabdallh123/BELYARN",
-    "BRANCH": "master",
+    "BRANCH": "main",       # ✅ تم التغيير إلى الفرع الصحيح
     "FILE_PATH": "l4.xlsx",
     "LOCAL_FILE": "l4.xlsx",
     "MAX_ACTIVE_USERS": 2,
@@ -258,13 +258,14 @@ def load_sheets_for_edit():
 # -----------------------------------------------
 # دوال الحفظ مع إرجاع رسائل خطأ مفصلة
 # -----------------------------------------------
+# -----------------------------------------------
+# دوال الحفظ مع إرجاع رسائل خطأ مفصلة (محسّن)
+# -----------------------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
     """
-    تعيد tuple: (new_sheets_or_None, error_message)
+    حفظ الملف محلياً ورفعه إلى GitHub على الفرع 'main' مع التحقق من وجود الملف.
     """
-    error_messages = []
-    
-    # 1. حفظ محلي
+    # 1. حفظ محلي - يبقى كما هو
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
@@ -277,20 +278,20 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         error_msg = f"❌ فشل الحفظ المحلي:\n{str(e)}\n\n{traceback.format_exc()}"
         return (None, error_msg)
     
-    # 2. مسح الكاش
+    # 2. مسح الكاش - يبقى كما هو
     try:
         st.cache_data.clear()
     except:
         pass
     
-    # 3. رفع إلى GitHub
+    # 3. رفع إلى GitHub (تم التعديل هنا)
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
-        error_msg = "⚠⚠⚠ لا يوجد GitHub token في secrets. تم الحفظ محلياً فقط، ولكن لم يتم الرفع إلى GitHub.\n\nلحل المشكلة: أضف token في ملف secrets (Streamlit Cloud -> Settings -> Secrets)."
+        error_msg = "⚠⚠⚠ لا يوجد GitHub token في secrets. تم الحفظ محلياً فقط."
         return (load_sheets_for_edit(), error_msg)
     
     if not GITHUB_AVAILABLE:
-        error_msg = "⚠⚠⚠ PyGithub غير مثبت. تم الحفظ محلياً فقط.\n\nلحل المشكلة: قم بتثبيته باستخدام: pip install PyGithub"
+        error_msg = "⚠⚠⚠ PyGithub غير مثبت. تم الحفظ محلياً فقط."
         return (load_sheets_for_edit(), error_msg)
     
     try:
@@ -299,38 +300,43 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
             content = f.read()
         
+        # استخدام الفرع 'main' كما هو محدد في إعدادات التطبيق
+        target_branch = APP_CONFIG["BRANCH"]  # يجب أن يساوي "main" في الإعدادات
+        
+        # 🔄 التحقق من وجود الملف أولاً لتجنب خطأ 404
         try:
-            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+            # محاولة جلب معلومات الملف من GitHub
+            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=target_branch)
+            # الملف موجود -> تحديثه
             result = repo.update_file(
                 path=APP_CONFIG["FILE_PATH"],
                 message=commit_message,
                 content=content,
                 sha=contents.sha,
-                branch=APP_CONFIG["BRANCH"]
+                branch=target_branch
             )
             return (load_sheets_for_edit(), None)
-        except Exception as e:
-            try:
-                result = repo.create_file(
-                    path=APP_CONFIG["FILE_PATH"],
-                    message=commit_message,
-                    content=content,
-                    branch=APP_CONFIG["BRANCH"]
-                )
-                return (load_sheets_for_edit(), None)
-            except Exception as create_err:
-                error_msg = f"❌❌❌ فشل إنشاء/تحديث الملف على GitHub:\n{str(create_err)}\n\n{traceback.format_exc()}"
-                return (None, error_msg)
+            
+        except github.GithubException.UnknownObjectException:
+            # الملف غير موجود -> إنشاؤه لأول مرة
+            result = repo.create_file(
+                path=APP_CONFIG["FILE_PATH"],
+                message=f"Create initial file: {commit_message}",
+                content=content,
+                branch=target_branch
+            )
+            return (load_sheets_for_edit(), None)
+            
     except Exception as e:
-        error_msg = f"❌❌❌ فشل الاتصال بـ GitHub:\n{str(e)}\n\n{traceback.format_exc()}"
+        error_msg = f"❌❌❌ فشل الاتصال بـ GitHub أو الرفع:\n{str(e)}\n{traceback.format_exc()}"
         return (None, error_msg)
 
 def auto_save_to_github(sheets_dict, operation_description):
+    """دالة مساعدة للحفظ على GitHub (بدون تغيير)"""
     username = st.session_state.get("username", "unknown")
     commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     new_sheets, error = save_local_excel_and_push(sheets_dict, commit_message)
     return (new_sheets, error)
-
 # -------------------------------
 # دوال مساعدة للواجهة والفحص
 # -------------------------------
