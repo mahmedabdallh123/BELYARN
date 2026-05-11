@@ -261,11 +261,14 @@ def load_sheets_for_edit():
 # -----------------------------------------------
 # دوال الحفظ مع إرجاع رسائل خطأ مفصلة (محسّن)
 # -----------------------------------------------
+import requests
+import base64
+
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
     """
-    حفظ الملف محلياً ورفعه إلى GitHub على الفرع 'main' مع التحقق من وجود الملف.
+    حفظ الملف محلياً ورفعه إلى GitHub باستخدام API مباشر (requests).
     """
-    # 1. حفظ محلي - يبقى كما هو
+    # 1. حفظ محلي (نفس الكود القديم)
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
@@ -277,60 +280,68 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     except Exception as e:
         error_msg = f"❌ فشل الحفظ المحلي:\n{str(e)}\n\n{traceback.format_exc()}"
         return (None, error_msg)
-    
-    # 2. مسح الكاش - يبقى كما هو
+
+    # 2. مسح الكاش
     try:
         st.cache_data.clear()
     except:
         pass
-    
-    # 3. رفع إلى GitHub (تم التعديل هنا)
+
+    # 3. رفع إلى GitHub عبر API
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
         error_msg = "⚠⚠⚠ لا يوجد GitHub token في secrets. تم الحفظ محلياً فقط."
         return (load_sheets_for_edit(), error_msg)
-    
-    if not GITHUB_AVAILABLE:
-        error_msg = "⚠⚠⚠ PyGithub غير مثبت. تم الحفظ محلياً فقط."
-        return (load_sheets_for_edit(), error_msg)
-    
-    try:
-        g = Github(token)
-        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
-        with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
-            content = f.read()
-        
-        # استخدام الفرع 'main' كما هو محدد في إعدادات التطبيق
-        target_branch = APP_CONFIG["BRANCH"]  # يجب أن يساوي "main" في الإعدادات
-        
-        # 🔄 التحقق من وجود الملف أولاً لتجنب خطأ 404
-        try:
-            # محاولة جلب معلومات الملف من GitHub
-            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=target_branch)
-            # الملف موجود -> تحديثه
-            result = repo.update_file(
-                path=APP_CONFIG["FILE_PATH"],
-                message=commit_message,
-                content=content,
-                sha=contents.sha,
-                branch=target_branch
-            )
-            return (load_sheets_for_edit(), None)
-            
-        except github.GithubException.UnknownObjectException:
-            # الملف غير موجود -> إنشاؤه لأول مرة
-            result = repo.create_file(
-                path=APP_CONFIG["FILE_PATH"],
-                message=f"Create initial file: {commit_message}",
-                content=content,
-                branch=target_branch
-            )
-            return (load_sheets_for_edit(), None)
-            
-    except Exception as e:
-        error_msg = f"❌❌❌ فشل الاتصال بـ GitHub أو الرفع:\n{str(e)}\n{traceback.format_exc()}"
-        return (None, error_msg)
 
+    # قراءة محتوى الملف المحلي
+    with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
+        file_content = f.read()
+    encoded_content = base64.b64encode(file_content).decode("utf-8")
+
+    # إعداد API endpoint
+    owner_repo = APP_CONFIG["REPO_NAME"]  # "mahmedabdallh123/BELYARN"
+    branch = APP_CONFIG["BRANCH"]          # "main"
+    file_path = APP_CONFIG["FILE_PATH"]    # "l4.xlsx"
+    url = f"https://api.github.com/repos/{owner_repo}/contents/{file_path}"
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    data = {
+        "message": commit_message,
+        "content": encoded_content,
+        "branch": branch
+    }
+
+    try:
+        # أولاً: محاولة الحصول على معلومات الملف (للتأكد من وجوده والحصول على SHA)
+        response = requests.get(url, headers=headers, params={"ref": branch})
+        if response.status_code == 200:
+            # الملف موجود -> تحديث
+            sha = response.json()["sha"]
+            data["sha"] = sha
+            put_response = requests.put(url, headers=headers, json=data)
+            if put_response.status_code in [200, 201]:
+                return (load_sheets_for_edit(), None)
+            else:
+                error_msg = f"❌ فشل تحديث الملف على GitHub:\n{put_response.status_code}\n{put_response.text}"
+                return (None, error_msg)
+        elif response.status_code == 404:
+            # الملف غير موجود -> إنشاء
+            put_response = requests.put(url, headers=headers, json=data)
+            if put_response.status_code in [200, 201]:
+                return (load_sheets_for_edit(), None)
+            else:
+                error_msg = f"❌ فشل إنشاء الملف على GitHub:\n{put_response.status_code}\n{put_response.text}"
+                return (None, error_msg)
+        else:
+            error_msg = f"❌ فشل الاتصال بـ GitHub للتحقق من الملف:\n{response.status_code}\n{response.text}"
+            return (None, error_msg)
+
+    except Exception as e:
+        error_msg = f"❌❌❌ استثناء أثناء رفع الملف:\n{str(e)}\n{traceback.format_exc()}"
+        return (None, error_msg)
 def auto_save_to_github(sheets_dict, operation_description):
     """دالة مساعدة للحفظ على GitHub (بدون تغيير)"""
     username = st.session_state.get("username", "unknown")
