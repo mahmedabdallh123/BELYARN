@@ -489,6 +489,12 @@ with tabs[0]:
             check_service_status(card_num, current_tons, all_sheets)
 
 with tabs[1]:
+    if sheets_edit is None:
+    st.error("❌ لا يمكن الوصول إلى بيانات Excel. الرجاء تحديث الملف من GitHub.")
+    if st.button("🔄 تحديث الآن"):
+        if fetch_from_github_requests():
+            st.rerun()
+    st.stop()
     st.header("🛠 تعديل وإدارة البيانات")
     if sheets_edit is None:
         st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
