@@ -28,7 +28,6 @@ APP_CONFIG = {
     "LOCAL_FILE": "l4.xlsx",
     "MAX_ACTIVE_USERS": 2,
     "SESSION_DURATION_MINUTES": 15,
-    # تبويبات جديدة (بدون إدارة مستخدمين ولا دعم فني ولا ايفينت)
     "CUSTOM_TABS": ["📊 فحص السيرفيس", "🛠 تعديل وإدارة البيانات"]
 }
 
@@ -39,10 +38,11 @@ MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
 # -------------------------------
-# دوال إدارة المستخدمين والجلسات (بدون واجهة إدارة)
+# دوال إدارة المستخدمين والجلسات (بدون صلاحيات)
 # -------------------------------
 def load_users():
     if not os.path.exists(USERS_FILE):
+        # مستخدم افتراضي واحد فقط (admin)
         default_users = {
             "admin": {
                 "password": "admin123",
@@ -57,8 +57,14 @@ def load_users():
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             users = json.load(f)
+        # التأكد من وجود مستخدم admin واحد على الأقل
         if "admin" not in users:
-            users["admin"] = {"password": "admin123", "role": "admin", "created_at": datetime.now().isoformat(), "permissions": ["all"]}
+            users["admin"] = {
+                "password": "admin123",
+                "role": "admin",
+                "created_at": datetime.now().isoformat(),
+                "permissions": ["all"]
+            }
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(users, f, indent=4, ensure_ascii=False)
         return users
@@ -141,8 +147,9 @@ def login_ui():
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
         st.session_state.username = None
-        st.session_state.user_role = None
-        st.session_state.user_permissions = []
+        # جميع المستخدمين سيحصلون على نفس الصلاحيات (admin)
+        st.session_state.user_role = "admin"
+        st.session_state.user_permissions = ["all"]
 
     st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
     try:
@@ -163,6 +170,7 @@ def login_ui():
         if st.button("تسجيل الدخول"):
             current_users = load_users()
             if username_input in current_users and current_users[username_input]["password"] == password:
+                # التحقق من الجلسات (نفس المنطق القديم)
                 if username_input != "admin" and username_input in active_users:
                     st.warning("⚠ هذا المستخدم مسجل دخول بالفعل.")
                     return False
@@ -173,17 +181,17 @@ def login_ui():
                 save_state(state)
                 st.session_state.logged_in = True
                 st.session_state.username = username_input
-                st.session_state.user_role = current_users[username_input].get("role", "viewer")
-                st.session_state.user_permissions = current_users[username_input].get("permissions", ["view"])
-                st.success(f"✅ تم تسجيل الدخول: {username_input} ({st.session_state.user_role})")
+                # تعيين صلاحيات كاملة لأي مستخدم
+                st.session_state.user_role = "admin"
+                st.session_state.user_permissions = ["all"]
+                st.success(f"✅ تم تسجيل الدخول: {username_input}")
                 st.rerun()
             else:
                 st.error("❌ كلمة المرور غير صحيحة.")
         return False
     else:
         username = st.session_state.username
-        user_role = st.session_state.user_role
-        st.success(f"✅ مسجل الدخول كـ: {username} ({user_role})")
+        st.success(f"✅ مسجل الدخول كـ: {username}")
         rem = remaining_time(state, username)
         if rem:
             mins, secs = divmod(int(rem.total_seconds()), 60)
@@ -196,7 +204,7 @@ def login_ui():
         return True
 
 # -------------------------------
-# دوال GitHub الأساسية
+# دوال GitHub الأساسية (نفس السابق)
 # -------------------------------
 def fetch_from_github_requests():
     try:
@@ -331,7 +339,7 @@ def auto_save_to_github(sheets_dict, operation_description):
     return save_local_excel_and_push(sheets_dict, commit_message)
 
 # -------------------------------
-# دوال مساعدة عامة
+# دوال مساعدة عامة (نفس السابق)
 # -------------------------------
 def normalize_name(s):
     if s is None: return ""
@@ -359,14 +367,6 @@ def highlight_cell(val, col_name):
 def style_table(row):
     return [highlight_cell(row[col], col) for col in row.index]
 
-def get_user_permissions(user_role, user_permissions):
-    if user_role == "admin":
-        return {"can_view": True, "can_edit": True}
-    elif user_role == "editor":
-        return {"can_view": True, "can_edit": True}
-    else:
-        return {"can_view": "view" in user_permissions or "edit" in user_permissions, "can_edit": "edit" in user_permissions}
-
 def get_servised_by_value(row):
     servised_columns = ["Servised by", "SERVISED BY", "servised by", "Servised By", "Serviced by", "Service by", "Serviced By", "Service By", "خدم بواسطة", "تم الخدمة بواسطة", "فني الخدمة"]
     for col in servised_columns:
@@ -383,7 +383,7 @@ def get_servised_by_value(row):
     return "-"
 
 # -------------------------------
-# دوال فحص السيرفيس (محتفظ بها)
+# دوال فحص السيرفيس (نفس السابق)
 # -------------------------------
 def check_service_status(card_num, current_tons, all_sheets):
     if not all_sheets:
@@ -541,7 +541,7 @@ def show_service_statistics(service_stats, result_df):
             st.dataframe(slice_stats_df, use_container_width=True, height=400)
 
 # -------------------------------
-# دوال تعديل البيانات (محتفظ بها)
+# دوال تعديل البيانات (نفس السابق)
 # -------------------------------
 def add_new_event(sheets_edit):
     st.subheader("➕ إضافة حدث جديد")
@@ -749,11 +749,10 @@ with st.sidebar:
     else:
         state = cleanup_sessions(load_state())
         username = st.session_state.username
-        user_role = st.session_state.user_role
         rem = remaining_time(state, username)
         if rem:
             mins, secs = divmod(int(rem.total_seconds()), 60)
-            st.success(f"👋 {username} | الدور: {user_role} | ⏳ {mins:02d}:{secs:02d}")
+            st.success(f"👋 {username} | ⏳ {mins:02d}:{secs:02d}")
         else:
             logout_action()
     st.markdown("---")
@@ -768,8 +767,6 @@ with st.sidebar:
         users = load_users()
         username = st.session_state.get("username")
         if username and username in users:
-            st.session_state.user_role = users[username].get("role", "viewer")
-            st.session_state.user_permissions = users[username].get("permissions", ["view"])
             st.success("✅ تم تحديث بيانات الجلسة!")
             st.rerun()
     if st.button("🔍 اختبار الاتصال بـ GitHub", key="check_github"):
@@ -782,16 +779,8 @@ all_sheets = load_all_sheets()
 sheets_edit = load_sheets_for_edit()
 st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
 
-username = st.session_state.get("username")
-user_role = st.session_state.get("user_role", "viewer")
-user_permissions = st.session_state.get("user_permissions", ["view"])
-permissions = get_user_permissions(user_role, user_permissions)
-
-# تبويبات جديدة: فقط فحص السيرفيس وتعديل البيانات
-if permissions["can_edit"]:
-    tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
-else:
-    tabs = st.tabs(["📊 فحص السيرفيس"])
+# جميع المستخدمين المسجلين لديهم صلاحية التعديل، لذلك نعرض التبويبين دائماً
+tabs = st.tabs(APP_CONFIG["CUSTOM_TABS"])
 
 # تبويب فحص السيرفيس
 with tabs[0]:
@@ -809,63 +798,62 @@ with tabs[0]:
         if st.session_state.get("show_service_results", False):
             check_service_status(card_num, current_tons, all_sheets)
 
-# تبويب تعديل وإدارة البيانات (للمستخدمين الذين لديهم صلاحية edit)
-if permissions["can_edit"] and len(tabs) > 1:
-    with tabs[1]:
-        st.header("🛠 تعديل وإدارة البيانات")
-        if sheets_edit is None:
-            st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
-        else:
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
-            with tab1:
-                sheets_edit = edit_sheet_with_save_button(sheets_edit)
-            with tab2:
-                st.subheader("➕ إضافة صف جديد")
-                sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-                df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-                st.markdown("أدخل بيانات الصف الجديد:")
-                new_data = {}
-                cols = st.columns(3)
-                for i, col in enumerate(df_add.columns):
-                    with cols[i % 3]:
-                        new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
-                        new_row_df = pd.DataFrame([new_data]).astype(str)
-                        df_new = pd.concat([df_add, new_row_df], ignore_index=True)
-                        sheets_edit[sheet_name_add] = df_new.astype(object)
-                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
+# تبويب تعديل وإدارة البيانات (متاح للجميع)
+with tabs[1]:
+    st.header("🛠 تعديل وإدارة البيانات")
+    if sheets_edit is None:
+        st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
+    else:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
+        with tab1:
+            sheets_edit = edit_sheet_with_save_button(sheets_edit)
+        with tab2:
+            st.subheader("➕ إضافة صف جديد")
+            sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+            df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+            st.markdown("أدخل بيانات الصف الجديد:")
+            new_data = {}
+            cols = st.columns(3)
+            for i, col in enumerate(df_add.columns):
+                with cols[i % 3]:
+                    new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
+                    new_row_df = pd.DataFrame([new_data]).astype(str)
+                    df_new = pd.concat([df_add, new_row_df], ignore_index=True)
+                    sheets_edit[sheet_name_add] = df_new.astype(object)
+                    new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
+                    if new_sheets is not None:
+                        sheets_edit = new_sheets
+                        st.success("✅ تم إضافة الصف الجديد بنجاح!")
+                        st.rerun()
+            with col_btn2:
+                if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
+                    st.rerun()
+        with tab3:
+            st.subheader("🆕 إضافة عمود جديد")
+            sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
+            df_col = sheets_edit[sheet_name_col].astype(str)
+            new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
+            default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
+                    if new_col_name:
+                        df_col[new_col_name] = default_value
+                        sheets_edit[sheet_name_col] = df_col.astype(object)
+                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
                         if new_sheets is not None:
                             sheets_edit = new_sheets
-                            st.success("✅ تم إضافة الصف الجديد بنجاح!")
+                            st.success("✅ تم إضافة العمود الجديد بنجاح!")
                             st.rerun()
-                with col_btn2:
-                    if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
-                        st.rerun()
-            with tab3:
-                st.subheader("🆕 إضافة عمود جديد")
-                sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
-                df_col = sheets_edit[sheet_name_col].astype(str)
-                new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
-                default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
-                        if new_col_name:
-                            df_col[new_col_name] = default_value
-                            sheets_edit[sheet_name_col] = df_col.astype(object)
-                            new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
-                            if new_sheets is not None:
-                                sheets_edit = new_sheets
-                                st.success("✅ تم إضافة العمود الجديد بنجاح!")
-                                st.rerun()
-                        else:
-                            st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
-                with col_btn2:
-                    if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
-                        st.rerun()
-            with tab4:
-                add_new_event(sheets_edit)
-            with tab5:
-                edit_events_and_corrections(sheets_edit)
+                    else:
+                        st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
+            with col_btn2:
+                if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
+                    st.rerun()
+        with tab4:
+            add_new_event(sheets_edit)
+        with tab5:
+            edit_events_and_corrections(sheets_edit)
