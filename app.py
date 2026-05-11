@@ -486,7 +486,7 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     if response.status_code in [200, 201]:
         st.success(f"✅ تم رفع الملف إلى GitHub بنجاح (commit: {response.json().get('commit', {}).get('sha', '')[:7]})")
         # تسجيل النشاط (اختياري)
-        def log_activity(action_type, details):
+def log_activity(action_type, details):
     """تسجيل النشاط في ملف JSON محلي"""
     log_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -503,15 +503,10 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         except:
             pass
     log.append(log_entry)
-    # الاحتفاظ بآخر 100 نشاط
     if len(log) > 100:
         log = log[-100:]
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2, ensure_ascii=False)
-        return load_sheets_for_edit()  # إعادة تحميل البيانات بعد الرفع
-    else:
-        st.error(f"❌ فشل الرفع إلى GitHub: {response.status_code} - {response.text}")
-        return sheets_dict
 def auto_save_to_github(sheets_dict, operation_description):
     """حفظ تلقائي باستخدام الدالة المحسنة"""
     commit_message = f"{operation_description} by {st.session_state.get('username', 'unknown')}"
