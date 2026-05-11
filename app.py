@@ -314,7 +314,64 @@ def fetch_from_github_api():
     except Exception as e:
         st.error(f"⚠ فشل تحميل الملف من GitHub: {e}")
         return False
-
+def check_github_file_exists():
+    """التحقق من وجود الملف على GitHub وعرض معلومات عن التوكن والاتصال"""
+    st.subheader("🔍 تشخيص الاتصال بـ GitHub")
+    
+    # التحقق من التوكن
+    token = st.secrets.get("github", {}).get("token", None)
+    if not token:
+        st.error("❌ GitHub token غير موجود في secrets. لن يتمكن التطبيق من رفع التعديلات.")
+        st.info("أضف token في `.streamlit/secrets.toml` هكذا:\n```\n[github]\ntoken = 'ghp_xxxxxx'\n```")
+    else:
+        st.success("✅ GitHub token موجود.")
+        # إظهار أول وآخر 4 حروف للتحقق (لا تعرض التوكن كاملاً)
+        masked = token[:4] + "..." + token[-4:] if len(token) > 8 else "***"
+        st.code(f"Token: {masked}")
+    
+    # التحقق من PyGithub
+    if GITHUB_AVAILABLE:
+        st.success("✅ PyGithub مثبت ومتاح.")
+    else:
+        st.error("❌ PyGithub غير مثبت. قم بتثبيته: `pip install PyGithub`")
+    
+    # محاولة الوصول إلى الملف عبر requests
+    st.markdown("---")
+    st.write("**محاولة الوصول إلى الملف عبر رابط RAW:**")
+    try:
+        response = requests.head(GITHUB_EXCEL_URL, timeout=10)
+        if response.status_code == 200:
+            st.success(f"✅ الملف موجود على GitHub (HTTP {response.status_code})")
+        elif response.status_code == 404:
+            st.error(f"❌ الملف غير موجود (HTTP 404). تأكد من: REPO_NAME, BRANCH, FILE_PATH")
+            st.write("رابط الملف:", GITHUB_EXCEL_URL)
+        else:
+            st.warning(f"⚠ استجابة غير متوقعة: HTTP {response.status_code}")
+    except Exception as e:
+        st.error(f"❌ فشل الاتصال: {e}")
+    
+    # تجربة PyGithub API
+    if GITHUB_AVAILABLE and token:
+        st.markdown("---")
+        st.write("**محاولة الوصول عبر PyGithub API:**")
+        try:
+            g = Github(token)
+            repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+            try:
+                contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+                st.success(f"✅ تم العثور على الملف. SHA: {contents.sha[:8]}...")
+                st.write(f"آخر تحديث: {contents.last_modified if hasattr(contents, 'last_modified') else 'غير معروف'}")
+            except Exception as e:
+                st.error(f"❌ الملف غير موجود أو لا يمكن الوصول إليه: {e}")
+                # محاولة إنشاء ملف اختبار
+                if st.button("إنشاء ملف اختبار test.txt"):
+                    try:
+                        repo.create_file("test.txt", "test commit", b"test content", branch=APP_CONFIG["BRANCH"])
+                        st.success("✅ تم إنشاء ملف test.txt - التوكن يعمل والرفع ممكن")
+                    except Exception as create_err:
+                        st.error(f"❌ فشل إنشاء ملف اختبار: {create_err}")
+        except Exception as e:
+            st.error(f"❌ خطأ في الاتصال بـ GitHub API: {e}")
 # -------------------------------
 # 📂 تحميل الشيتات (مخبأ) - معدل لقراءة جميع الشيتات
 # -------------------------------
@@ -365,59 +422,94 @@ def load_sheets_for_edit():
 # 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل
 # -------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
-    """دالة محسنة للحفظ التلقائي المحلي والرفع إلى GitHub"""
-    # احفظ محلياً
+    """حفظ محلي ورفع إلى GitHub مع محاولات إعادة متعددة ومعالجة أخطاء أفضل"""
+    # 1. حفظ محلي
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
                 try:
                     sh.to_excel(writer, sheet_name=name, index=False)
-                except Exception:
+                except Exception as e:
+                    st.warning(f"⚠ تحويل {name} إلى object بسبب: {e}")
                     sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+        st.success("✅ تم الحفظ محلياً.")
     except Exception as e:
-        st.error(f"⚠ خطأ أثناء الحفظ المحلي: {e}")
+        st.error(f"❌ فشل الحفظ المحلي: {e}")
         return None
 
-    # امسح الكاش
+    # 2. مسح الكاش
     try:
         st.cache_data.clear()
     except:
         pass
 
-    # حاول الرفع عبر PyGithub token في secrets
+    # 3. رفع إلى GitHub
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
-        st.warning("⚠ لم يتم العثور على GitHub token. سيتم الحفظ محلياً فقط.")
-        return load_sheets_for_edit()
+        st.warning("⚠ لم يتم العثور على GitHub token. لن يتم الرفع إلى GitHub.")
+        return sheets_dict  # نعود بنفس البيانات لأنها حفظت محلياً
 
     if not GITHUB_AVAILABLE:
-        st.warning("⚠ PyGithub غير متوفر. سيتم الحفظ محلياً فقط.")
-        return load_sheets_for_edit()
+        st.warning("⚠ PyGithub غير متوفر. قم بتثبيته لرفع التغييرات.")
+        return sheets_dict
 
-    try:
-        g = Github(token)
-        repo = g.get_repo(APP_CONFIG["REPO_NAME"])
-        with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
-            content = f.read()
-
+    # محاولة الرفع مع إعادة المحاولة
+    max_retries = 2
+    for attempt in range(max_retries):
         try:
-            contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
-            result = repo.update_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, sha=contents.sha, branch=APP_CONFIG["BRANCH"])
-            st.success(f"✅ تم الحفظ والرفع إلى GitHub بنجاح: {commit_message}")
-            return load_sheets_for_edit()
-        except Exception as e:
-            # حاول رفع كملف جديد أو إنشاء
+            g = Github(token)
+            repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+            
+            with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
+                content = f.read()
+            
+            # محاولة الحصول على أحدث SHA للملف
             try:
-                result = repo.create_file(path=APP_CONFIG["FILE_PATH"], message=commit_message, content=content, branch=APP_CONFIG["BRANCH"])
-                st.success(f"✅ تم إنشاء ملف جديد على GitHub: {commit_message}")
-                return load_sheets_for_edit()
-            except Exception as create_error:
-                st.error(f"❌ فشل إنشاء ملف جديد على GitHub: {create_error}")
-                return None
-
-    except Exception as e:
-        st.error(f"❌ فشل الرفع إلى GitHub: {e}")
-        return None
+                contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+                current_sha = contents.sha
+                # تحديث الملف
+                result = repo.update_file(
+                    path=APP_CONFIG["FILE_PATH"],
+                    message=commit_message,
+                    content=content,
+                    sha=current_sha,
+                    branch=APP_CONFIG["BRANCH"]
+                )
+                st.success(f"✅ تم رفع التحديث إلى GitHub (commit: {result['commit'].sha[:7]})")
+                return load_sheets_for_edit()  # إعادة تحميل البيانات المحدثة
+                
+            except Exception as e_get:
+                # الملف غير موجود – حاول الإنشاء
+                if "404" in str(e_get) or "Not Found" in str(e_get):
+                    st.info("📄 الملف غير موجود على GitHub، جاري إنشاؤه...")
+                    try:
+                        result = repo.create_file(
+                            path=APP_CONFIG["FILE_PATH"],
+                            message=commit_message,
+                            content=content,
+                            branch=APP_CONFIG["BRANCH"]
+                        )
+                        st.success(f"✅ تم إنشاء الملف الجديد على GitHub (commit: {result['commit'].sha[:7]})")
+                        return load_sheets_for_edit()
+                    except Exception as create_err:
+                        st.error(f"❌ فشل إنشاء الملف: {create_err}")
+                        raise
+                else:
+                    # خطأ آخر
+                    st.error(f"❌ فشل الحصول على معلومات الملف: {e_get}")
+                    raise
+        
+        except Exception as e:
+            st.error(f"⚠ محاولة {attempt+1} من {max_retries} فشلت: {e}")
+            if attempt == max_retries - 1:
+                st.error("❌ فشل رفع الملف إلى GitHub بعد عدة محاولات. تم الحفظ محلياً فقط.")
+                return sheets_dict
+            else:
+                st.info("🔄 إعادة المحاولة بعد ثانيتين...")
+                import time
+                time.sleep(2)
+    
+    return sheets_dict
 
 def auto_save_to_github(sheets_dict, operation_description):
     """دالة الحفظ التلقائي المحسنة"""
@@ -2542,6 +2634,11 @@ elif permissions["can_edit"]:  # editor
     tabs = st.tabs(["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن", "🛠 تعديل وإدارة البيانات"])
 else:  # viewer
     tabs = st.tabs(["📊 فحص السيرفيس", "📋 فحص الإيفينت والكوريكشن"])
+
+with st.sidebar:
+    # ... الكود الموجود ...
+    if st.button("🔍 اختبار الاتصال بـ GitHub", key="check_github"):
+        check_github_file_exists()
 
 # -------------------------------
 # Tab: فحص السيرفيس (لجميع المستخدمين)
