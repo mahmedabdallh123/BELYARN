@@ -487,24 +487,25 @@ with tabs[0]:
             st.session_state["show_service_results"] = True
         if st.session_state.get("show_service_results", False):
             check_service_status(card_num, current_tons, all_sheets)
-
 with tabs[1]:
-    if sheets_edit is None:
-    st.error("❌ لا يمكن الوصول إلى بيانات Excel. الرجاء تحديث الملف من GitHub.")
-    if st.button("🔄 تحديث الآن"):
-        if fetch_from_github_requests():
-            st.rerun()
-    st.stop()
     st.header("🛠 تعديل وإدارة البيانات")
+    
+    # التحقق من وجود البيانات
     if sheets_edit is None:
-        st.warning("❗ الملف المحلي غير موجود. اضغط تحديث من GitHub في الشريط الجانبي أولًا.")
-    else:
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
-        with tab1:
-            sheets_edit = edit_sheet_with_save_button(sheets_edit)
-        with tab2:
-            st.subheader("➕ إضافة صف جديد")
-            sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+        st.error("❌ لا يمكن الوصول إلى بيانات Excel. الرجاء تحديث الملف من GitHub.")
+        if st.button("🔄 تحديث الآن"):
+            if fetch_from_github_requests():
+                st.rerun()
+        st.stop()  # إيقاف التنفيذ لبقية هذا التبويب
+    
+    # باقي الكود الأصلي (بدون تغيير) مع مراعاة المسافة البادئة الصحيحة
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
+    with tab1:
+        sheets_edit = edit_sheet_with_save_button(sheets_edit)
+    with tab2:
+        st.subheader("➕ إضافة صف جديد")
+        sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+        # ... باقي الكود
             df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
             st.markdown("أدخل بيانات الصف الجديد:")
             new_data = {}
