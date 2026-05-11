@@ -496,60 +496,64 @@ with tabs[1]:
         if st.button("🔄 تحديث الآن"):
             if fetch_from_github_requests():
                 st.rerun()
-        st.stop()  # إيقاف التنفيذ لبقية هذا التبويب
+        st.stop()
     
-    # باقي الكود الأصلي (بدون تغيير) مع مراعاة المسافة البادئة الصحيحة
+    # باقي الكود الأصلي مع المسافة البادئة الصحيحة
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
+    
     with tab1:
         sheets_edit = edit_sheet_with_save_button(sheets_edit)
-with tab2:
-    st.subheader("➕ إضافة صف جديد")
-    sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-    df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-    st.markdown("أدخل بيانات الصف الجديد:")
-    new_data = {}
-    # ... باقي الكود
-            cols = st.columns(3)
-            for i, col in enumerate(df_add.columns):
-                with cols[i % 3]:
-                    new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
-                    new_row_df = pd.DataFrame([new_data]).astype(str)
-                    df_new = pd.concat([df_add, new_row_df], ignore_index=True)
-                    sheets_edit[sheet_name_add] = df_new.astype(object)
-                    new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
+    
+    with tab2:
+        st.subheader("➕ إضافة صف جديد")
+        sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+        df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+        st.markdown("أدخل بيانات الصف الجديد:")
+        new_data = {}
+        cols = st.columns(3)
+        for i, col in enumerate(df_add.columns):
+            with cols[i % 3]:
+                new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
+                new_row_df = pd.DataFrame([new_data]).astype(str)
+                df_new = pd.concat([df_add, new_row_df], ignore_index=True)
+                sheets_edit[sheet_name_add] = df_new.astype(object)
+                new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
+                if new_sheets is not None:
+                    sheets_edit = new_sheets
+                    st.success("✅ تم إضافة الصف الجديد بنجاح!")
+                    st.rerun()
+        with col_btn2:
+            if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
+                st.rerun()
+    
+    with tab3:
+        st.subheader("🆕 إضافة عمود جديد")
+        sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
+        df_col = sheets_edit[sheet_name_col].astype(str)
+        new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
+        default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
+                if new_col_name:
+                    df_col[new_col_name] = default_value
+                    sheets_edit[sheet_name_col] = df_col.astype(object)
+                    new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
                     if new_sheets is not None:
                         sheets_edit = new_sheets
-                        st.success("✅ تم إضافة الصف الجديد بنجاح!")
+                        st.success("✅ تم إضافة العمود الجديد بنجاح!")
                         st.rerun()
-            with col_btn2:
-                if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
-                    st.rerun()
-        with tab3:
-            st.subheader("🆕 إضافة عمود جديد")
-            sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
-            df_col = sheets_edit[sheet_name_col].astype(str)
-            new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
-            default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
-                    if new_col_name:
-                        df_col[new_col_name] = default_value
-                        sheets_edit[sheet_name_col] = df_col.astype(object)
-                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
-                        if new_sheets is not None:
-                            sheets_edit = new_sheets
-                            st.success("✅ تم إضافة العمود الجديد بنجاح!")
-                            st.rerun()
-                    else:
-                        st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
-            with col_btn2:
-                if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
-                    st.rerun()
-        with tab4:
-            add_new_event(sheets_edit)
-        with tab5:
-            edit_events_and_corrections(sheets_edit)
+                else:
+                    st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
+        with col_btn2:
+            if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
+                st.rerun()
+    
+    with tab4:
+        add_new_event(sheets_edit)
+    
+    with tab5:
+        edit_events_and_corrections(sheets_edit)
