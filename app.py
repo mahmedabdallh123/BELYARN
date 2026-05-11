@@ -422,7 +422,7 @@ def load_sheets_for_edit():
 # 🔁 حفظ محلي + رفع على GitHub + مسح الكاش + إعادة تحميل
 # -------------------------------
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
-    """حفظ محلي ورفع إلى GitHub باستخدام requests API (أكثر استقراراً)"""
+    """حفظ محلي ورفع إلى GitHub باستخدام requests API (محسّن)"""
     # 1. حفظ محلي
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
@@ -437,16 +437,17 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         return None
 
     # 2. مسح الكاش
-    try:
-        st.cache_data.clear()
-    except:
-        pass
+    st.cache_data.clear()
 
-    # 3. رفع إلى GitHub باستخدام API (بدون PyGithub)
+    # 3. رفع إلى GitHub
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
         st.warning("⚠ لا يوجد GitHub token، تم الحفظ محلياً فقط.")
         return sheets_dict
+
+    # إضافة اسم المستخدم إلى commit message إن أمكن
+    username = st.session_state.get("username", "unknown")
+    full_commit_message = f"{commit_message} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
     # قراءة الملف المحلي
     with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
@@ -454,26 +455,23 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     import base64
     encoded_content = base64.b64encode(file_content).decode('utf-8')
 
-    # إعداد API request
     url = f"https://api.github.com/repos/{APP_CONFIG['REPO_NAME']}/contents/{APP_CONFIG['FILE_PATH']}"
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json"
     }
 
-    # أولاً: الحصول على SHA الحالي (إذا كان الملف موجوداً)
+    # الحصول على SHA للملف (إذا كان موجوداً)
     response = requests.get(url, headers=headers)
     sha = None
     if response.status_code == 200:
         sha = response.json().get("sha")
-        st.info("📄 الملف موجود على GitHub، سيتم تحديثه.")
     elif response.status_code != 404:
         st.error(f"❌ فشل الاتصال بـ GitHub: {response.status_code} - {response.text}")
         return sheets_dict
 
-    # ثانياً: إنشاء أو تحديث الملف
     data = {
-        "message": commit_message,
+        "message": full_commit_message,
         "content": encoded_content,
         "branch": APP_CONFIG["BRANCH"]
     }
@@ -481,25 +479,43 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         data["sha"] = sha
 
     if sha:
-        # تحديث
         response = requests.put(url, headers=headers, json=data)
     else:
-        # إنشاء
         response = requests.put(url, headers=headers, json=data)
 
     if response.status_code in [200, 201]:
         st.success(f"✅ تم رفع الملف إلى GitHub بنجاح (commit: {response.json().get('commit', {}).get('sha', '')[:7]})")
-        return load_sheets_for_edit()
+        # تسجيل النشاط (اختياري)
+        def log_activity(action_type, details):
+    """تسجيل النشاط في ملف JSON محلي"""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "username": st.session_state.get("username", "unknown"),
+        "action_type": action_type,
+        "details": details
+    }
+    log_file = "activity_log.json"
+    log = []
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                log = json.load(f)
+        except:
+            pass
+    log.append(log_entry)
+    # الاحتفاظ بآخر 100 نشاط
+    if len(log) > 100:
+        log = log[-100:]
+    with open(log_file, "w", encoding="utf-8") as f:
+        json.dump(log, f, indent=2, ensure_ascii=False)
+        return load_sheets_for_edit()  # إعادة تحميل البيانات بعد الرفع
     else:
         st.error(f"❌ فشل الرفع إلى GitHub: {response.status_code} - {response.text}")
         return sheets_dict
-
 def auto_save_to_github(sheets_dict, operation_description):
-    """حفظ تلقائي باستخدام الدالة المحسنة أعلاه"""
-    username = st.session_state.get("username", "unknown")
-    commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    """حفظ تلقائي باستخدام الدالة المحسنة"""
+    commit_message = f"{operation_description} by {st.session_state.get('username', 'unknown')}"
     return save_local_excel_and_push(sheets_dict, commit_message)
-# -------------------------------
 # 🧰 دوال مساعدة للمعالجة والنصوص
 # -------------------------------
 def normalize_name(s):
