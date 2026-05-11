@@ -502,13 +502,13 @@ with tabs[1]:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
     with tab1:
         sheets_edit = edit_sheet_with_save_button(sheets_edit)
-    with tab2:
-        st.subheader("➕ إضافة صف جديد")
-        sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-        # ... باقي الكود
-            df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-            st.markdown("أدخل بيانات الصف الجديد:")
-            new_data = {}
+with tab2:
+    st.subheader("➕ إضافة صف جديد")
+    sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+    df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+    st.markdown("أدخل بيانات الصف الجديد:")
+    new_data = {}
+    # ... باقي الكود
             cols = st.columns(3)
             for i, col in enumerate(df_add.columns):
                 with cols[i % 3]:
