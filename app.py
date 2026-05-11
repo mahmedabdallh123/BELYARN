@@ -288,6 +288,8 @@ def load_sheets_for_edit():
         return None
 
 def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit"):
+    """حفظ محلي ورفع إلى GitHub (ينشئ الملف إذا لم يكن موجوداً)"""
+    # 1. حفظ محلي
     try:
         with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
             for name, sh in sheets_dict.items():
@@ -300,7 +302,10 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
         st.error(f"❌ فشل الحفظ المحلي: {e}")
         return None
 
+    # 2. مسح الكاش
     st.cache_data.clear()
+
+    # 3. رفع إلى GitHub
     token = st.secrets.get("github", {}).get("token", None)
     if not token:
         st.warning("⚠ لا يوجد GitHub token، تم الحفظ محلياً فقط.")
@@ -308,6 +313,8 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
 
     username = st.session_state.get("username", "unknown")
     full_commit_message = f"{commit_message} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    # قراءة الملف المحلي
     with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
         file_content = f.read()
     import base64
@@ -315,25 +322,37 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
 
     url = f"https://api.github.com/repos/{APP_CONFIG['REPO_NAME']}/contents/{APP_CONFIG['FILE_PATH']}"
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
-    response = requests.get(url, headers=headers)
+
+    # التحقق من وجود الملف
+    get_resp = requests.get(url, headers=headers)
     sha = None
-    if response.status_code == 200:
-        sha = response.json().get("sha")
-    elif response.status_code != 404:
-        st.error(f"❌ فشل الاتصال بـ GitHub: {response.status_code}")
+    if get_resp.status_code == 200:
+        sha = get_resp.json().get("sha")
+        st.info("📄 تحديث ملف موجود على GitHub.")
+    elif get_resp.status_code == 404:
+        st.info("📄 إنشاء ملف جديد على GitHub.")
+    else:
+        st.error(f"❌ فشل الاتصال بـ GitHub: {get_resp.status_code} - {get_resp.text[:100]}")
         return sheets_dict
 
-    data = {"message": full_commit_message, "content": encoded_content, "branch": APP_CONFIG["BRANCH"]}
+    data = {
+        "message": full_commit_message,
+        "content": encoded_content,
+        "branch": APP_CONFIG["BRANCH"]
+    }
     if sha:
         data["sha"] = sha
-    response = requests.put(url, headers=headers, json=data)
-    if response.status_code in [200, 201]:
-        st.success(f"✅ تم رفع الملف إلى GitHub بنجاح")
+
+    # تنفيذ الرفع (PUT)
+    resp = requests.put(url, headers=headers, json=data)
+
+    if resp.status_code in [200, 201]:
+        st.success(f"✅ تم رفع الملف إلى GitHub بنجاح ({'تحديث' if sha else 'إنشاء'})")
+        # إعادة تحميل البيانات بعد الرفع
         return load_sheets_for_edit()
     else:
-        st.error(f"❌ فشل الرفع إلى GitHub: {response.status_code}")
+        st.error(f"❌ فشل الرفع إلى GitHub: {resp.status_code} - {resp.text[:200]}")
         return sheets_dict
-
 def auto_save_to_github(sheets_dict, operation_description):
     commit_message = f"{operation_description} by {st.session_state.get('username', 'unknown')}"
     return save_local_excel_and_push(sheets_dict, commit_message)
