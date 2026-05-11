@@ -241,7 +241,7 @@ def push_to_github():
             return True
         except Exception as e:
             # إذا كان الملف غير موجود، نقوم بإنشائه
-            if e.status == 404:
+            if hasattr(e, 'status') and e.status == 404:
                 repo.create_file(
                     path=APP_CONFIG["FILE_PATH"],
                     message=f"إنشاء ملف جديد - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -289,6 +289,8 @@ def save_and_push_to_github(sheets_dict, operation_name):
 
 def auto_save_to_github(sheets_dict, operation_description):
     """دالة مساعدة للحفظ التلقائي (تستدعي save_and_push_to_github)"""
+    if sheets_dict is None:
+        return None
     success = save_and_push_to_github(sheets_dict, operation_description)
     if success:
         # إعادة تحميل البيانات بعد الحفظ
@@ -319,7 +321,7 @@ def check_github_file_exists():
         st.error(f"❌ فشل الاتصال: {e}")
 
 # -------------------------------
-# دوال تحميل البيانات (بدون تغيير)
+# دوال تحميل البيانات
 # -------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_sheets():
@@ -350,19 +352,7 @@ def load_sheets_for_edit():
         return None
 
 # -------------------------------
-# باقي دوال فحص السيرفيس وتعديل البيانات (بدون تغيير)
-# تم حذفها للاختصار، ولكنها موجودة بالكامل في الكود الأصلي للمستخدم)
-# سأضعها كما هي ولكن يجب نسخها من الكود الأصلي للمستخدم.
-# -------------------------------
-
-# (هنا سيتم وضع دوال normalize_name, split_needed_services, highlight_cell, style_table,
-#  get_servised_by_value, check_service_status, show_service_statistics,
-#  add_new_event, edit_events_and_corrections, edit_sheet_with_save_button
-#  وجميع الدوال الأخرى التي كانت موجودة في الكود الأصلي للمستخدم.
-#  نظرًا لطول الكود، سأختصرها وأضع تعليقاً بأنها كما هي.
-
-# -------------------------------
-# دوال فحص السيرفيس (نفس الكود الأصلي)
+# دوال فحص السيرفيس (نفس الكود الأصلي - يجب نسخها كاملة من التطبيق الأصلي)
 # -------------------------------
 def normalize_name(s):
     if s is None: return ""
@@ -406,30 +396,219 @@ def get_servised_by_value(row):
     return "-"
 
 def check_service_status(card_num, current_tons, all_sheets):
-    # ... (نفس الكود الأصلي) ...
+    # هذه الدالة يجب أن تأتي من الكود الأصلي الكامل. هنا نضع تطبيقًا مؤقتًا:
+    st.warning("⚠ دالة check_service_status لم تُكتمل بعد. يرجى إضافة الكود الأصلي.")
     pass
 
 def show_service_statistics(service_stats, result_df):
-    # ... (نفس الكود الأصلي) ...
+    st.warning("⚠ دالة show_service_statistics لم تُكتمل بعد.")
     pass
 
 # -------------------------------
-# دوال تعديل البيانات (نفس الكود الأصلي)
+# دوال تعديل البيانات (تطبيقات آمنة)
 # -------------------------------
 def add_new_event(sheets_edit):
-    # ... (نفس الكود الأصلي) ...
-    pass
+    if sheets_edit is None:
+        st.error("لا يمكن إضافة حدث: البيانات غير متوفرة.")
+        return
+    st.subheader("➕ إضافة حدث جديد")
+    sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="add_event_sheet")
+    df = sheets_edit[sheet_name].astype(str)
+    st.markdown("أدخل بيانات الحدث الجديد:")
+    col1, col2 = st.columns(2)
+    with col1:
+        card_num = st.text_input("رقم الماكينة:", key="new_event_card")
+        event_text = st.text_area("الحدث:", key="new_event_text")
+    with col2:
+        correction_text = st.text_area("التصحيح:", key="new_correction_text")
+        serviced_by = st.text_input("فني الخدمة:", key="new_serviced_by")
+    event_date = st.text_input("التاريخ (مثال: 20\\5\\2025):", key="new_event_date")
+    if st.button("💾 إضافة الحدث الجديد", key="add_new_event_btn"):
+        if not card_num.strip():
+            st.warning("⚠ الرجاء إدخال رقم الماكينة.")
+            return
+        new_row = {}
+        new_row["card"] = card_num.strip()
+        if event_date.strip():
+            new_row["Date"] = event_date.strip()
+        event_columns = [col for col in df.columns if normalize_name(col) in ["event", "events", "الحدث", "الأحداث"]]
+        if event_columns and event_text.strip():
+            new_row[event_columns[0]] = event_text.strip()
+        elif not event_columns and event_text.strip():
+            new_row["Event"] = event_text.strip()
+        correction_columns = [col for col in df.columns if normalize_name(col) in ["correction", "correct", "تصحيح", "تصويب"]]
+        if correction_columns and correction_text.strip():
+            new_row[correction_columns[0]] = correction_text.strip()
+        elif not correction_columns and correction_text.strip():
+            new_row["Correction"] = correction_text.strip()
+        servised_col = None
+        servised_columns = [col for col in df.columns if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]]
+        if servised_columns:
+            servised_col = servised_columns[0]
+        else:
+            for col in df.columns:
+                if "servis" in normalize_name(col) or "service" in normalize_name(col) or "فني" in col:
+                    servised_col = col
+                    break
+            if not servised_col:
+                servised_col = "Servised by"
+        if serviced_by.strip():
+            new_row[servised_col] = serviced_by.strip()
+        new_row_df = pd.DataFrame([new_row]).astype(str)
+        df_new = pd.concat([df, new_row_df], ignore_index=True)
+        sheets_edit[sheet_name] = df_new.astype(object)
+        new_sheets = auto_save_to_github(sheets_edit, f"إضافة حدث جديد في {sheet_name}")
+        if new_sheets is not None:
+            st.success("✅ تم إضافة الحدث الجديد بنجاح!")
+            st.rerun()
+        else:
+            st.error("❌ فشل حفظ الحدث.")
 
 def edit_events_and_corrections(sheets_edit):
-    # ... (نفس الكود الأصلي) ...
-    pass
+    if sheets_edit is None:
+        st.error("لا يمكن تعديل الأحداث: البيانات غير متوفرة.")
+        return
+    st.subheader("✏ تعديل الحدث والتصحيح")
+    sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_events_sheet")
+    df = sheets_edit[sheet_name].astype(str)
+    st.markdown("### 📋 البيانات الحالية (الحدث والتصحيح)")
+    display_columns = ["card", "Date"]
+    event_columns = [col for col in df.columns if normalize_name(col) in ["event", "events", "الحدث", "الأحداث"]]
+    if event_columns:
+        display_columns.append(event_columns[0])
+    correction_columns = [col for col in df.columns if normalize_name(col) in ["correction", "correct", "تصحيح", "تصويب"]]
+    if correction_columns:
+        display_columns.append(correction_columns[0])
+    servised_columns = [col for col in df.columns if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]]
+    if servised_columns:
+        display_columns.append(servised_columns[0])
+    display_df = df[display_columns].copy()
+    st.dataframe(display_df, use_container_width=True)
+    st.markdown("### ✏ اختر الصف للتعديل")
+    row_index = st.number_input("رقم الصف (ابدأ من 0):", min_value=0, max_value=len(df)-1, step=1, key="edit_row_index")
+    if st.button("تحميل بيانات الصف", key="load_row_data"):
+        if 0 <= row_index < len(df):
+            st.session_state["editing_row"] = row_index
+            st.session_state["editing_data"] = df.iloc[row_index].to_dict()
+    if "editing_data" in st.session_state:
+        editing_data = st.session_state["editing_data"]
+        st.markdown("### تعديل البيانات")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_card = st.text_input("رقم الماكينة:", value=editing_data.get("card", ""), key="edit_card")
+            new_date = st.text_input("التاريخ:", value=editing_data.get("Date", ""), key="edit_date")
+        with col2:
+            new_serviced_by = st.text_input("فني الخدمة:", value=editing_data.get("Servised by", ""), key="edit_serviced_by")
+        event_col = None
+        correction_col = None
+        for col in df.columns:
+            col_norm = normalize_name(col)
+            if col_norm in ["event", "events", "الحدث", "الأحداث"]:
+                event_col = col
+            elif col_norm in ["correction", "correct", "تصحيح", "تصويب"]:
+                correction_col = col
+        if event_col:
+            new_event = st.text_area("الحدث:", value=editing_data.get(event_col, ""), key="edit_event")
+        if correction_col:
+            new_correction = st.text_area("التصحيح:", value=editing_data.get(correction_col, ""), key="edit_correction")
+        if st.button("💾 حفظ التعديلات", key="save_edits_btn"):
+            df.at[row_index, "card"] = new_card
+            df.at[row_index, "Date"] = new_date
+            if event_col:
+                df.at[row_index, event_col] = new_event
+            if correction_col:
+                df.at[row_index, correction_col] = new_correction
+            servised_col = None
+            for col in df.columns:
+                if normalize_name(col) in ["servisedby", "servicedby", "serviceby", "خدمبواسطة"]:
+                    servised_col = col
+                    break
+            if servised_col and new_serviced_by.strip():
+                df.at[row_index, servised_col] = new_serviced_by.strip()
+            sheets_edit[sheet_name] = df.astype(object)
+            new_sheets = auto_save_to_github(sheets_edit, f"تعديل حدث في {sheet_name} - الصف {row_index}")
+            if new_sheets is not None:
+                st.success("✅ تم حفظ التعديلات بنجاح!")
+                if "editing_row" in st.session_state:
+                    del st.session_state["editing_row"]
+                if "editing_data" in st.session_state:
+                    del st.session_state["editing_data"]
+                st.rerun()
 
 def edit_sheet_with_save_button(sheets_edit):
-    # ... (نفس الكود الأصلي) ...
-    pass
+    if sheets_edit is None:
+        st.error("لا توجد بيانات للتعديل.")
+        return sheets_edit
+    st.subheader("✏ تعديل البيانات")
+    if "original_sheets" not in st.session_state:
+        st.session_state.original_sheets = sheets_edit.copy()
+    if "unsaved_changes" not in st.session_state:
+        st.session_state.unsaved_changes = {}
+    sheet_name = st.selectbox("اختر الشيت:", list(sheets_edit.keys()), key="edit_sheet")
+    if sheet_name not in st.session_state.unsaved_changes:
+        st.session_state.unsaved_changes[sheet_name] = False
+    df = sheets_edit[sheet_name].astype(str).copy()
+    st.markdown(f"### 📋 تحرير شيت: {sheet_name}")
+    st.info(f"عدد الصفوف: {len(df)} | عدد الأعمدة: {len(df.columns)}")
+    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key=f"editor_{sheet_name}")
+    has_changes = not edited_df.equals(df)
+    if has_changes:
+        st.session_state.unsaved_changes[sheet_name] = True
+        st.warning("⚠ لديك تغييرات غير محفوظة!")
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("💾 حفظ التغييرات", key=f"save_{sheet_name}", type="primary"):
+                sheets_edit[sheet_name] = edited_df.astype(object)
+                new_sheets = auto_save_to_github(sheets_edit, f"تعديل يدوي في شيت {sheet_name}")
+                if new_sheets is not None:
+                    sheets_edit = new_sheets
+                    st.session_state.unsaved_changes[sheet_name] = False
+                    st.success(f"✅ تم حفظ التغييرات في شيت {sheet_name} بنجاح!")
+                    st.session_state.original_sheets[sheet_name] = edited_df.copy()
+                    st.rerun()
+                else:
+                    st.error("❌ فشل حفظ التغييرات!")
+        with col2:
+            if st.button("↩️ تراجع عن التغييرات", key=f"undo_{sheet_name}"):
+                if sheet_name in st.session_state.original_sheets:
+                    sheets_edit[sheet_name] = st.session_state.original_sheets[sheet_name].astype(object)
+                    st.session_state.unsaved_changes[sheet_name] = False
+                    st.info(f"↩️ تم التراجع عن التغييرات في شيت {sheet_name}")
+                    st.rerun()
+                else:
+                    st.warning("⚠ لا توجد بيانات أصلية للتراجع!")
+        with col3:
+            with st.expander("📊 ملخص التغييرات", expanded=False):
+                changes_count = 0
+                if len(edited_df) > len(df):
+                    added_rows = len(edited_df) - len(df)
+                    st.write(f"➕ **صفوف مضافة:** {added_rows}")
+                    changes_count += added_rows
+                elif len(edited_df) < len(df):
+                    deleted_rows = len(df) - len(edited_df)
+                    st.write(f"🗑️ **صفوف محذوفة:** {deleted_rows}")
+                    changes_count += deleted_rows
+                changed_cells = 0
+                if len(edited_df) == len(df) and edited_df.columns.equals(df.columns):
+                    for col in df.columns:
+                        if not edited_df[col].equals(df[col]):
+                            col_changes = (edited_df[col] != df[col]).sum()
+                            changed_cells += col_changes
+                if changed_cells > 0:
+                    st.write(f"✏️ **خلايا معدلة:** {changed_cells}")
+                    changes_count += changed_cells
+                if changes_count == 0:
+                    st.write("🔄 **لا توجد تغييرات**")
+    else:
+        if st.session_state.unsaved_changes.get(sheet_name, False):
+            st.info("ℹ️ التغييرات السابقة تم حفظها.")
+            st.session_state.unsaved_changes[sheet_name] = False
+        if st.button("🔄 تحديث البيانات", key=f"refresh_{sheet_name}"):
+            st.rerun()
+    return sheets_edit
 
 # ===============================
-# الواجهة الرئيسية (بدون تغيير)
+# الواجهة الرئيسية
 # ===============================
 st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
@@ -487,6 +666,10 @@ with tabs[0]:
             st.session_state["show_service_results"] = True
         if st.session_state.get("show_service_results", False):
             check_service_status(card_num, current_tons, all_sheets)
+
+# ----------------------------------------------
+# تبويب تعديل وإدارة البيانات (تم إصلاحه)
+# ----------------------------------------------
 with tabs[1]:
     st.header("🛠 تعديل وإدارة البيانات")
     
@@ -496,64 +679,80 @@ with tabs[1]:
         if st.button("🔄 تحديث الآن"):
             if fetch_from_github_requests():
                 st.rerun()
-        st.stop()
-    
-    # باقي الكود الأصلي مع المسافة البادئة الصحيحة
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
-    
-    with tab1:
-        sheets_edit = edit_sheet_with_save_button(sheets_edit)
-    
-    with tab2:
-        st.subheader("➕ إضافة صف جديد")
-        sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
-        df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
-        st.markdown("أدخل بيانات الصف الجديد:")
-        new_data = {}
-        cols = st.columns(3)
-        for i, col in enumerate(df_add.columns):
-            with cols[i % 3]:
-                new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
-                new_row_df = pd.DataFrame([new_data]).astype(str)
-                df_new = pd.concat([df_add, new_row_df], ignore_index=True)
-                sheets_edit[sheet_name_add] = df_new.astype(object)
-                new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
-                if new_sheets is not None:
-                    sheets_edit = new_sheets
-                    st.success("✅ تم إضافة الصف الجديد بنجاح!")
-                    st.rerun()
-        with col_btn2:
-            if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
-                st.rerun()
-    
-    with tab3:
-        st.subheader("🆕 إضافة عمود جديد")
-        sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
-        df_col = sheets_edit[sheet_name_col].astype(str)
-        new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
-        default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
-                if new_col_name:
-                    df_col[new_col_name] = default_value
-                    sheets_edit[sheet_name_col] = df_col.astype(object)
-                    new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
-                    if new_sheets is not None:
-                        sheets_edit = new_sheets
-                        st.success("✅ تم إضافة العمود الجديد بنجاح!")
+        # لا نستخدم st.stop() بل نمنع عرض الأتبويبات بالعودة
+    else:
+        # نضيف تبويبات فرعية فقط إذا كانت البيانات موجودة
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["عرض وتعديل شيت", "إضافة صف جديد", "إضافة عمود جديد", "➕ إضافة حدث جديد", "✏ تعديل الحدث"])
+        
+        with tab1:
+            sheets_edit = edit_sheet_with_save_button(sheets_edit)
+        
+        with tab2:
+            if sheets_edit is not None:
+                st.subheader("➕ إضافة صف جديد")
+                sheet_name_add = st.selectbox("اختر الشيت لإضافة صف:", list(sheets_edit.keys()), key="add_sheet")
+                df_add = sheets_edit[sheet_name_add].astype(str).reset_index(drop=True)
+                st.markdown("أدخل بيانات الصف الجديد:")
+                new_data = {}
+                cols = st.columns(3)
+                for i, col in enumerate(df_add.columns):
+                    with cols[i % 3]:
+                        new_data[col] = st.text_input(f"{col}", key=f"add_{sheet_name_add}_{col}")
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("💾 إضافة الصف الجديد", key=f"add_row_{sheet_name_add}", type="primary"):
+                        new_row_df = pd.DataFrame([new_data]).astype(str)
+                        df_new = pd.concat([df_add, new_row_df], ignore_index=True)
+                        sheets_edit[sheet_name_add] = df_new.astype(object)
+                        new_sheets = auto_save_to_github(sheets_edit, f"إضافة صف جديد في {sheet_name_add}")
+                        if new_sheets is not None:
+                            sheets_edit = new_sheets
+                            st.success("✅ تم إضافة الصف الجديد بنجاح!")
+                            st.rerun()
+                        else:
+                            st.error("❌ فشل حفظ البيانات.")
+                with col_btn2:
+                    if st.button("🗑 مسح الحقول", key=f"clear_{sheet_name_add}"):
                         st.rerun()
-                else:
-                    st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
-        with col_btn2:
-            if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
-                st.rerun()
-    
-    with tab4:
-        add_new_event(sheets_edit)
-    
-    with tab5:
-        edit_events_and_corrections(sheets_edit)
+            else:
+                st.error("لا توجد بيانات لإضافة صف.")
+        
+        with tab3:
+            if sheets_edit is not None:
+                st.subheader("🆕 إضافة عمود جديد")
+                sheet_name_col = st.selectbox("اختر الشيت لإضافة عمود:", list(sheets_edit.keys()), key="add_col_sheet")
+                df_col = sheets_edit[sheet_name_col].astype(str)
+                new_col_name = st.text_input("اسم العمود الجديد:", key="new_col_name")
+                default_value = st.text_input("القيمة الافتراضية لكل الصفوف (اختياري):", "", key="default_value")
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("💾 إضافة العمود الجديد", key=f"add_col_{sheet_name_col}", type="primary"):
+                        if new_col_name:
+                            df_col[new_col_name] = default_value
+                            sheets_edit[sheet_name_col] = df_col.astype(object)
+                            new_sheets = auto_save_to_github(sheets_edit, f"إضافة عمود جديد '{new_col_name}' إلى {sheet_name_col}")
+                            if new_sheets is not None:
+                                sheets_edit = new_sheets
+                                st.success("✅ تم إضافة العمود الجديد بنجاح!")
+                                st.rerun()
+                            else:
+                                st.error("❌ فشل حفظ البيانات.")
+                        else:
+                            st.warning("⚠ الرجاء إدخال اسم العمود الجديد.")
+                with col_btn2:
+                    if st.button("🗑 مسح", key=f"clear_col_{sheet_name_col}"):
+                        st.rerun()
+            else:
+                st.error("لا توجد بيانات لإضافة عمود.")
+        
+        with tab4:
+            if sheets_edit is not None:
+                add_new_event(sheets_edit)
+            else:
+                st.error("لا توجد بيانات لإضافة حدث.")
+        
+        with tab5:
+            if sheets_edit is not None:
+                edit_events_and_corrections(sheets_edit)
+            else:
+                st.error("لا توجد بيانات لتعديل الأحداث.")
