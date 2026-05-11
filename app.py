@@ -512,17 +512,98 @@ def save_local_excel_and_push(sheets_dict, commit_message="Update from Streamlit
     return sheets_dict
 
 def auto_save_to_github(sheets_dict, operation_description):
-    """دالة الحفظ التلقائي المحسنة"""
+    """
+    حفظ التغييرات محلياً ورفعها إلى GitHub تلقائياً.
+    تعيد قاموس الشيتات المحدث (من الملف المُحمل حديثاً) أو None في حالة فشل كامل.
+    """
     username = st.session_state.get("username", "unknown")
     commit_message = f"{operation_description} by {username} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     
-    result = save_local_excel_and_push(sheets_dict, commit_message)
-    if result is not None:
-        st.success("✅ تم حفظ التغييرات تلقائياً في GitHub")
-        return result
-    else:
-        st.error("❌ فشل الحفظ التلقائي")
+    # ========== 1. حفظ محلي ==========
+    try:
+        with pd.ExcelWriter(APP_CONFIG["LOCAL_FILE"], engine="openpyxl") as writer:
+            for name, sh in sheets_dict.items():
+                try:
+                    sh.to_excel(writer, sheet_name=name, index=False)
+                except Exception as inner_e:
+                    # محاولة التحويل إلى object إذا فشل الحفظ العادي
+                    st.warning(f"⚠ شيت {name} تم حفظه كـ object بسبب خطأ: {inner_e}")
+                    sh.astype(object).to_excel(writer, sheet_name=name, index=False)
+        st.success("✅ تم الحفظ محلياً.")
+    except Exception as e:
+        st.error(f"❌ فشل الحفظ المحلي: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+        return None   # فشل كامل
+
+    # ========== 2. مسح الكاش ==========
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    # ========== 3. الرفع إلى GitHub ==========
+    token = st.secrets.get("github", {}).get("token", None)
+    if not token:
+        st.warning("⚠ لم يتم العثور على GitHub token في secrets. تم الحفظ محلياً فقط.")
+        return sheets_dict   # يعيد نفس البيانات (بدون رفع)
+
+    if not GITHUB_AVAILABLE:
+        st.warning("⚠ PyGithub غير متوفر. قم بتثبيته: `pip install PyGithub`. تم الحفظ محلياً فقط.")
         return sheets_dict
+
+    # محاولات الرفع مع إعادة المحاولة
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            g = Github(token, timeout=60)  # زيادة المهلة لـ60 ثانية
+            repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+
+            with open(APP_CONFIG["LOCAL_FILE"], "rb") as f:
+                content = f.read()
+
+            # محاولة الحصول على الملف الحالي (لتحديثه)
+            try:
+                contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
+                # تحديث الملف الموجود
+                result = repo.update_file(
+                    path=APP_CONFIG["FILE_PATH"],
+                    message=commit_message,
+                    content=content,
+                    sha=contents.sha,
+                    branch=APP_CONFIG["BRANCH"]
+                )
+                st.success(f"✅ تم رفع التحديث إلى GitHub (commit: {result['commit'].sha[:7]})")
+                # إعادة تحميل البيانات لضمان التزامن
+                return load_sheets_for_edit()
+            except Exception as e_get:
+                # إذا كان الملف غير موجود (404) - نحاول إنشاؤه
+                if "404" in str(e_get) or "Not Found" in str(e_get):
+                    st.info("📄 الملف غير موجود على GitHub، جاري إنشاؤه...")
+                    result = repo.create_file(
+                        path=APP_CONFIG["FILE_PATH"],
+                        message=commit_message,
+                        content=content,
+                        branch=APP_CONFIG["BRANCH"]
+                    )
+                    st.success(f"✅ تم إنشاء الملف الجديد على GitHub (commit: {result['commit'].sha[:7]})")
+                    return load_sheets_for_edit()
+                else:
+                    # خطأ آخر
+                    raise e_get
+
+        except Exception as e:
+            st.error(f"⚠ محاولة {attempt+1} من {max_retries} فشلت: {e}")
+            if attempt == max_retries - 1:
+                st.error("❌ فشل رفع الملف إلى GitHub بعد عدة محاولات. تم الحفظ محلياً فقط.")
+                # نعيد البيانات المحفوظة محلياً (لكن بدون رفع)
+                return sheets_dict
+            else:
+                st.info("🔄 إعادة المحاولة بعد 3 ثوانٍ...")
+                import time
+                time.sleep(3)
+
+    return None  # لا يجب الوصول هنا، لكن احتياطاً
 
 # -------------------------------
 # 🧰 دوال مساعدة للمعالجة والنصوص
