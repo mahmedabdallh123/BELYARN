@@ -1067,7 +1067,7 @@ def search_across_sheets(all_sheets):
             st.warning("لا توجد نتائج")
 
     # ================== الصيانة الوقائية (يبقى كما هو مع استخدام search_term) ==================
-    else:
+    elif search_type == "الصيانة الوقائية":
         maint_df = load_maintenance_tasks()
         if maint_df.empty:
             st.warning("لا توجد بيانات في الصيانة الوقائية")
@@ -1086,7 +1086,6 @@ def search_across_sheets(all_sheets):
             allowed_equipment = [eq for eq, sec in equipment_to_section.items() if sec == selected_section_filter]
             df_filtered = df_filtered[df_filtered["المعدة"].isin(allowed_equipment)]
         
-        # حقل البحث الخاص بالصيانة الوقائية
         search_term = st.text_input("🔍 كلمة البحث (المعدة، البند، الملاحظات...):", key="search_term_maintenance")
         if search_term:
             search_columns = ["المعدة", "نوع_الصيانة", "اسم_البند", "ملاحظات", "قطع_غيار_مستخدمة_افتراضية", "رابط_الصورة"]
@@ -1097,19 +1096,19 @@ def search_across_sheets(all_sheets):
             df_filtered = df_filtered[mask]
         
         if not df_filtered.empty:
-    df_filtered["القسم"] = df_filtered["المعدة"].map(equipment_to_section).fillna("غير محدد")
-    
-    # إضافة ترتيب تصاعدي حسب التاريخ (افترضنا وجود عمود 'التاريخ_التالي')
-    if 'التاريخ_التالي' in df_filtered.columns:
-        df_filtered['التاريخ_التالي'] = pd.to_datetime(df_filtered['التاريخ_التالي'], errors='coerce')
-        df_filtered = df_filtered.sort_values(by='التاريخ_التالي', ascending=True)
+            df_filtered["القسم"] = df_filtered["المعدة"].map(equipment_to_section).fillna("غير محدد")
+            
+            # ترتيب تصاعدي حسب التاريخ التالي (من الأقرب للأبعد)
+            if 'التاريخ_التالي' in df_filtered.columns:
+                df_filtered['التاريخ_التالي'] = pd.to_datetime(df_filtered['التاريخ_التالي'], errors='coerce')
+                df_filtered = df_filtered.sort_values(by='التاريخ_التالي', ascending=True)
 
-    st.success(f"تم العثور على {len(df_filtered)} مهمة صيانة")
-    st.dataframe(df_filtered, use_container_width=True)
-    excel_file = export_filtered_results_to_excel(df_filtered, "صيانة_وقائية")
-    st.download_button("📥 تحميل النتائج", excel_file, f"maintenance_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-else:
-    st.warning("لا توجد نتائج")
+            st.success(f"تم العثور على {len(df_filtered)} مهمة صيانة")
+            st.dataframe(df_filtered, use_container_width=True)
+            excel_file = export_filtered_results_to_excel(df_filtered, "صيانة_وقائية")
+            st.download_button("📥 تحميل النتائج", excel_file, f"maintenance_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.warning("لا توجد نتائج")
 # ------------------------------- دوال إدارة المعدات والأقسام -------------------------------
 def load_equipment_config():
     if not os.path.exists(EQUIPMENT_CONFIG_FILE):
