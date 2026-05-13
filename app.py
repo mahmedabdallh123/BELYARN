@@ -1100,7 +1100,7 @@ def search_across_sheets(all_sheets):
             df_filtered["القسم"] = df_filtered["المعدة"].map(equipment_to_section).fillna("غير محدد")
     
     # إضافة ترتيب تصاعدي حسب التاريخ (افترضنا وجود عمود 'التاريخ_التالي')
-        if 'التاريخ_التالي' in df_filtered.columns:
+    if 'التاريخ_التالي' in df_filtered.columns:
         df_filtered['التاريخ_التالي'] = pd.to_datetime(df_filtered['التاريخ_التالي'], errors='coerce')
         df_filtered = df_filtered.sort_values(by='التاريخ_التالي', ascending=True)
             st.success(f"تم العثور على {len(df_filtered)} مهمة صيانة")
