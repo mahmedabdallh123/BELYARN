@@ -16,7 +16,7 @@ from github import Github, GithubException
 APP_CONFIG = {
     "APP_TITLE": "بيل يارن1- CMMS",
     "APP_ICON": "🏭",
-    "REPO_NAME": "mahmedabdallh123/BELYARN",
+    "REPO_NAME": "mahmedabdallh123/stations",
     "BRANCH": "main",
     "FILE_PATH": "l9.xlsx",
     "LOCAL_FILE": "l9.xlsx",
@@ -61,8 +61,8 @@ IMAGES_FOLDER = APP_CONFIG["IMAGES_FOLDER"]
 EQUIPMENT_CONFIG_FILE = "equipment_config.json"
 
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
-GITHUB_USERS_URL = "https://raw.githubusercontent.com/mahmedabdallh123/BELYARN/refs/heads/main/users.json"
-GITHUB_REPO_USERS = "mahmedabdallh123/BELYARN"
+GITHUB_USERS_URL = "https://raw.githubusercontent.com/mahmedabdallh123/stations/refs/heads/main/users.json"
+GITHUB_REPO_USERS = "mahmedabdallh123/stations"
 GITHUB_TOKEN = st.secrets.get("github", {}).get("token", None)
 GITHUB_AVAILABLE = GITHUB_TOKEN is not None
 ACTIVITY_LOG_FILE = "activity_log.json"
@@ -1067,7 +1067,7 @@ def search_across_sheets(all_sheets):
             st.warning("لا توجد نتائج")
 
     # ================== الصيانة الوقائية (يبقى كما هو مع استخدام search_term) ==================
-    elif search_type == "الصيانة الوقائية":
+    else:
         maint_df = load_maintenance_tasks()
         if maint_df.empty:
             st.warning("لا توجد بيانات في الصيانة الوقائية")
@@ -1086,6 +1086,7 @@ def search_across_sheets(all_sheets):
             allowed_equipment = [eq for eq, sec in equipment_to_section.items() if sec == selected_section_filter]
             df_filtered = df_filtered[df_filtered["المعدة"].isin(allowed_equipment)]
         
+        # حقل البحث الخاص بالصيانة الوقائية
         search_term = st.text_input("🔍 كلمة البحث (المعدة، البند، الملاحظات...):", key="search_term_maintenance")
         if search_term:
             search_columns = ["المعدة", "نوع_الصيانة", "اسم_البند", "ملاحظات", "قطع_غيار_مستخدمة_افتراضية", "رابط_الصورة"]
@@ -1097,12 +1098,6 @@ def search_across_sheets(all_sheets):
         
         if not df_filtered.empty:
             df_filtered["القسم"] = df_filtered["المعدة"].map(equipment_to_section).fillna("غير محدد")
-            
-            # ترتيب تصاعدي حسب التاريخ التالي (من الأقرب للأبعد)
-            if 'التاريخ_التالي' in df_filtered.columns:
-                df_filtered['التاريخ_التالي'] = pd.to_datetime(df_filtered['التاريخ_التالي'], errors='coerce')
-                df_filtered = df_filtered.sort_values(by='التاريخ_التالي', ascending=True)
-
             st.success(f"تم العثور على {len(df_filtered)} مهمة صيانة")
             st.dataframe(df_filtered, use_container_width=True)
             excel_file = export_filtered_results_to_excel(df_filtered, "صيانة_وقائية")
