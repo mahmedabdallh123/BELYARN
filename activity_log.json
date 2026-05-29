@@ -1,11 +1,5 @@
 [
   {
-    "timestamp": "2026-05-11T08:11:01.696765",
-    "username": "admin",
-    "action_type": "add_maintenance_task",
-    "details": "تم إضافة بند صيانة 'تغير جريدتين علويتين خلفي320,240' للماكينة كرد22 (فترة 4640 ساعة)"
-  },
-  {
     "timestamp": "2026-05-11T08:11:38.873053",
     "username": "admin",
     "action_type": "add_maintenance_task",
@@ -598,5 +592,11 @@
     "username": "admin",
     "action_type": "delete_section",
     "details": "تم حذف القسم 'السحب' وقطع الغيار التابعة له"
+  },
+  {
+    "timestamp": "2026-05-29T09:22:16.000778",
+    "username": "admin",
+    "action_type": "delete_section",
+    "details": "تم حذف القسم 'الملفات' وقطع الغيار التابعة له"
   }
 ]
