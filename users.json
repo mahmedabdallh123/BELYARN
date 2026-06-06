@@ -20,7 +20,7 @@
         "permissions": {
             "all_sections": false
         },
-        "role": "viewer",
+        "role": "editor",
         "sections_permissions": {}
     },
     "مشرف_البرم": {
