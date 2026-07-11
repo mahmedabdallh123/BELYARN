@@ -9,9 +9,6 @@ import re
 from datetime import datetime, timedelta
 from base64 import b64decode
 from difflib import get_close_matches
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import numpy as np
 
 # GitHub
 try:
@@ -398,31 +395,36 @@ def generate_statistics(df, start_date, end_date):
     fdf = df[mask].copy()
     if fdf.empty:
         return pd.DataFrame(), None, None, None
-    
+
+    # 1. حسب نوع البالة
     stats_by_type = fdf.groupby('نوع البالة').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_type = stats_by_type.reset_index()
-    
+
+    # 2. حسب المشرف
     stats_by_supervisor = fdf.groupby('المشرف').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_supervisor.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_supervisor = stats_by_supervisor.reset_index()
-    
+
+    # 3. حسب الوردية
     stats_by_shift = fdf.groupby('الوردية').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_shift = stats_by_shift.reset_index()
-    
+
+    # 4. البيانات اليومية للرسوم البيانية
     daily_data = fdf.groupby('التاريخ').agg({
         'وزن البالة': ['sum', 'count']
     }).round(2)
     daily_data.columns = ['إجمالي الوزن', 'عدد البالات']
     daily_data = daily_data.reset_index()
-    
+    daily_data = daily_data.sort_values('التاريخ')
+
     return stats_by_type, stats_by_supervisor, stats_by_shift, daily_data
 
 def get_user_permissions(role, perms):
@@ -452,7 +454,7 @@ def admin_config_management_tab():
     st.info("هنا يمكنك إضافة أو حذف المشرفين وأنواع البالات. التغييرات تحفظ محلياً وعلى GitHub.")
 
     config = load_config()
-    
+
     st.subheader("👨‍🏭 المشرفون")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -490,7 +492,7 @@ def admin_config_management_tab():
         st.warning("لا يوجد مشرفون، الرجاء إضافة مشرف")
 
     st.markdown("---")
-    
+
     st.subheader("📦 أنواع البالات")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -699,10 +701,10 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                 sd = st.date_input("من", datetime.now().date() - timedelta(days=30))
             with col2:
                 ed = st.date_input("إلى", datetime.now().date())
-            
+
             if st.button("📈 عرض الإحصائيات والرسوم"):
                 stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(cotton_df, sd, ed)
-                
+
                 if stats_by_type.empty:
                     st.warning("لا توجد بيانات في هذه الفترة")
                 else:
@@ -710,99 +712,57 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                     total_weight = stats_by_type['إجمالي الوزن'].sum()
                     total_bales = stats_by_type['عدد البالات'].sum()
                     avg_weight = total_weight / total_bales if total_bales > 0 else 0
-                    
+
                     col1, col2, col3 = st.columns(3)
                     col1.metric("إجمالي الوزن", f"{total_weight:,.1f} كجم")
                     col2.metric("عدد البالات", f"{total_bales:,}")
                     col3.metric("متوسط الوزن", f"{avg_weight:.1f} كجم")
-                    
+
                     st.markdown("---")
-                    
-                    # الرسم البياني الخطي للوزن اليومي
+
+                    # الرسم البياني الخطي للوزن اليومي (باستخدام st.line_chart)
                     if daily_data is not None and not daily_data.empty:
                         st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        ax.plot(daily_data['التاريخ'], daily_data['إجمالي الوزن'], marker='o', linestyle='-', color='blue')
-                        ax.set_xlabel('التاريخ')
-                        ax.set_ylabel('الوزن (كجم)')
-                        ax.set_title('إجمالي الوزن اليومي')
-                        ax.grid(True, alpha=0.3)
-                        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-                        ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(daily_data)//10)))
-                        plt.xticks(rotation=45)
-                        st.pyplot(fig)
-                        plt.close()
-                        
-                        # الرسم البياني الخطي لعدد البالات اليومي
+                        # تهيئة البيانات للرسم
+                        daily_weight = daily_data.set_index('التاريخ')['إجمالي الوزن']
+                        st.line_chart(daily_weight, use_container_width=True)
+
                         st.subheader("📈 عدد البالات اليومي")
-                        fig2, ax2 = plt.subplots(figsize=(10, 5))
-                        ax2.plot(daily_data['التاريخ'], daily_data['عدد البالات'], marker='s', linestyle='-', color='orange')
-                        ax2.set_xlabel('التاريخ')
-                        ax2.set_ylabel('عدد البالات')
-                        ax2.set_title('عدد البالات يومياً')
-                        ax2.grid(True, alpha=0.3)
-                        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-                        ax2.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(daily_data)//10)))
-                        plt.xticks(rotation=45)
-                        st.pyplot(fig2)
-                        plt.close()
-                    
+                        daily_count = daily_data.set_index('التاريخ')['عدد البالات']
+                        st.line_chart(daily_count, use_container_width=True, color='#ff7f0e')
+
                     st.markdown("---")
-                    
+
                     # إحصائيات حسب نوع البالة - جدول ورسم بياني
                     st.subheader("📊 توزيع البالات حسب النوع")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_bar, ax_bar = plt.subplots(figsize=(10, 5))
-                        bars = ax_bar.bar(stats_by_type['نوع البالة'], stats_by_type['إجمالي الوزن'], color='skyblue')
-                        ax_bar.set_xlabel('نوع البالة')
-                        ax_bar.set_ylabel('الوزن (كجم)')
-                        ax_bar.set_title('إجمالي الوزن حسب نوع البالة')
-                        ax_bar.grid(True, alpha=0.3, axis='y')
-                        # إضافة الأرقام على الأعمدة
-                        for bar in bars:
-                            height = bar.get_height()
-                            ax_bar.text(bar.get_x() + bar.get_width()/2., height,
-                                        f'{height:.1f}', ha='center', va='bottom', fontsize=9)
-                        plt.xticks(rotation=45, ha='right')
-                        st.pyplot(fig_bar)
-                        plt.close()
+                        # رسم بياني شريطي
+                        bar_data = stats_by_type.set_index('نوع البالة')['إجمالي الوزن']
+                        st.bar_chart(bar_data, use_container_width=True)
                     with col2:
                         st.dataframe(stats_by_type, use_container_width=True)
-                    
+
                     st.markdown("---")
-                    
+
                     # إحصائيات حسب المشرف
                     st.subheader("👨‍🏭 أداء المشرفين")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_sup, ax_sup = plt.subplots(figsize=(10, 5))
-                        bars_sup = ax_sup.bar(stats_by_supervisor['المشرف'], stats_by_supervisor['إجمالي الوزن'], color='lightgreen')
-                        ax_sup.set_xlabel('المشرف')
-                        ax_sup.set_ylabel('الوزن (كجم)')
-                        ax_sup.set_title('إجمالي الوزن حسب المشرف')
-                        ax_sup.grid(True, alpha=0.3, axis='y')
-                        for bar in bars_sup:
-                            height = bar.get_height()
-                            ax_sup.text(bar.get_x() + bar.get_width()/2., height,
-                                        f'{height:.1f}', ha='center', va='bottom', fontsize=9)
-                        plt.xticks(rotation=45, ha='right')
-                        st.pyplot(fig_sup)
-                        plt.close()
+                        bar_sup = stats_by_supervisor.set_index('المشرف')['إجمالي الوزن']
+                        st.bar_chart(bar_sup, use_container_width=True, color='#2ca02c')
                     with col2:
                         st.dataframe(stats_by_supervisor, use_container_width=True)
-                    
+
                     st.markdown("---")
-                    
-                    # إحصائيات حسب الوردية - رسم بياني دائري
+
+                    # إحصائيات حسب الوردية - رسم بياني دائري (نستخدم st.pyplot مع matplotlib إذا متاح، ولكن لتجنب التبعيات نستخدم جدول)
                     st.subheader("🕒 توزيع الإنتاج حسب الوردية")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_pie, ax_pie = plt.subplots(figsize=(8, 8))
-                        ax_pie.pie(stats_by_shift['إجمالي الوزن'], labels=stats_by_shift['الوردية'], autopct='%1.1f%%', startangle=90)
-                        ax_pie.set_title('نسبة الإنتاج حسب الوردية')
-                        st.pyplot(fig_pie)
-                        plt.close()
+                        # نستخدم شريطاً معبأً بدلاً من دائري (أو نستخدم st.area_chart)
+                        shift_data = stats_by_shift.set_index('الوردية')['إجمالي الوزن']
+                        st.bar_chart(shift_data, use_container_width=True, color='#d62728')
                     with col2:
                         st.dataframe(stats_by_shift, use_container_width=True)
     idx += 1
