@@ -9,6 +9,8 @@ import re
 from datetime import datetime, timedelta
 from base64 import b64decode
 from difflib import get_close_matches
+import plotly.express as px
+import plotly.graph_objects as go
 
 # GitHub
 try:
@@ -38,7 +40,7 @@ APP_CONFIG = {
 
 USERS_FILE = "users.json"
 STATE_FILE = "state.json"
-CONFIG_FILE = "config.json"  # ملف جديد لتخزين المشرفين وأنواع البالات
+CONFIG_FILE = "config.json"
 SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
@@ -58,7 +60,6 @@ def load_config():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
-            # التأكد من وجود المفاتيح
             if "supervisors" not in config:
                 config["supervisors"] = default_config["supervisors"]
             if "bale_types" not in config:
@@ -69,11 +70,9 @@ def load_config():
         return default_config
 
 def save_config(config):
-    """حفظ التكوين ورفعه إلى GitHub إن أمكن"""
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
-        # رفع إلى GitHub
         token = st.secrets.get("github", {}).get("token", None)
         if token and GITHUB_AVAILABLE:
             try:
@@ -93,7 +92,6 @@ def save_config(config):
         st.error(f"خطأ في حفظ config.json: {e}")
         return False
 
-# تعديل دوال get_supervisors و get_bale_types لقراءة من config
 def get_supervisors():
     config = load_config()
     return config.get("supervisors", [])
@@ -102,9 +100,8 @@ def get_bale_types():
     config = load_config()
     return config.get("bale_types", [])
 
-# ---------- دوال المستخدمين والجلسات (معدلة لدعم الصلاحيات المتقدمة) ----------
+# ---------- دوال المستخدمين والجلسات ----------
 def load_users():
-    """تحميل المستخدمين مع دعم الصلاحيات المتقدمة (متوافق مع بنية الأقسام)"""
     if not os.path.exists(USERS_FILE):
         default_users = {
             "admin": {
@@ -135,7 +132,6 @@ def load_users():
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             users = json.load(f)
-            # توحيد البنية
             for uname, udata in users.items():
                 if "permissions" not in udata or isinstance(udata["permissions"], list):
                     if udata.get("role") == "admin":
@@ -155,11 +151,9 @@ def load_users():
         }
 
 def save_users(users):
-    """حفظ المستخدمين ورفعهم إلى GitHub إن أمكن"""
     try:
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(users, f, indent=4, ensure_ascii=False)
-        # رفع إلى GitHub إذا كان التوكن متوفراً
         token = st.secrets.get("github", {}).get("token", None)
         if token and GITHUB_AVAILABLE:
             try:
@@ -288,9 +282,8 @@ def login_ui():
             logout_action()
         return True
 
-# ---------- دوال الصلاحيات (للتطابق مع بنية الأقسام) ----------
+# ---------- دوال الصلاحيات ----------
 def get_user_permissions_dict(username):
-    """إرجاع صلاحيات المستخدم (متوافق مع بنية الأقسام)"""
     users = load_users()
     if username not in users:
         return {"all_sections": False, "sections_permissions": {}}
@@ -384,10 +377,6 @@ def get_current_shift():
             return name
     return "الثالثه"
 
-# تم تعديل هاتين الدالتين لقراءة من config
-# def get_supervisors():  موجودة أعلاه
-# def get_bale_types():   موجودة أعلاه
-
 def add_new_record(df, supervisor, bale_type, weight, notes=""):
     now = datetime.now()
     new = {
@@ -403,26 +392,49 @@ def add_new_record(df, supervisor, bale_type, weight, notes=""):
 
 def generate_statistics(df, start_date, end_date):
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), None, None, None
     df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
     mask = (df['التاريخ'] >= start_date) & (df['التاريخ'] <= end_date)
-    fdf = df[mask]
+    fdf = df[mask].copy()
     if fdf.empty:
-        return pd.DataFrame()
-    stats = fdf.groupby('نوع البالة').agg({
-        'وزن البالة': ['count', 'sum', 'mean'],
-        'المشرف': 'first'
+        return pd.DataFrame(), None, None, None
+    
+    # إحصائيات تفصيلية
+    # 1. حسب نوع البالة
+    stats_by_type = fdf.groupby('نوع البالة').agg({
+        'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
-    stats.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن', 'المشرف']
-    return stats.reset_index()
+    stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+    stats_by_type = stats_by_type.reset_index()
+    
+    # 2. حسب المشرف
+    stats_by_supervisor = fdf.groupby('المشرف').agg({
+        'وزن البالة': ['count', 'sum', 'mean']
+    }).round(2)
+    stats_by_supervisor.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+    stats_by_supervisor = stats_by_supervisor.reset_index()
+    
+    # 3. حسب الوردية
+    stats_by_shift = fdf.groupby('الوردية').agg({
+        'وزن البالة': ['count', 'sum', 'mean']
+    }).round(2)
+    stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+    stats_by_shift = stats_by_shift.reset_index()
+    
+    # 4. البيانات اليومية للرسوم البيانية
+    daily_data = fdf.groupby('التاريخ').agg({
+        'وزن البالة': ['sum', 'count']
+    }).round(2)
+    daily_data.columns = ['إجمالي الوزن', 'عدد البالات']
+    daily_data = daily_data.reset_index()
+    
+    return stats_by_type, stats_by_supervisor, stats_by_shift, daily_data
 
 def get_user_permissions(role, perms):
-    """دالة متوافقة مع الإصدار القديم لتبقى الواجهة تعمل"""
     if isinstance(perms, dict):
         if perms.get("all_sections", False):
             return {"can_input": True, "can_view_stats": True}
         else:
-            # نفحص الدور
             if role == "admin":
                 return {"can_input": True, "can_view_stats": True}
             elif role == "data_entry":
@@ -439,14 +451,13 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة التكوين (المشرفين وأنواع البالات) ----------
+# ---------- تبويب إدارة التكوين ----------
 def admin_config_management_tab():
     st.header("⚙️ إدارة المشرفين وأنواع البالات")
     st.info("هنا يمكنك إضافة أو حذف المشرفين وأنواع البالات. التغييرات تحفظ محلياً وعلى GitHub.")
 
     config = load_config()
     
-    # ---- إدارة المشرفين ----
     st.subheader("👨‍🏭 المشرفون")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -466,7 +477,6 @@ def admin_config_management_tab():
             else:
                 st.warning("⚠️ الرجاء إدخال اسم المشرف")
 
-    # عرض المشرفين الحاليين مع زر حذف
     if config["supervisors"]:
         for sup in config["supervisors"]:
             col1, col2 = st.columns([4, 1])
@@ -486,7 +496,6 @@ def admin_config_management_tab():
 
     st.markdown("---")
     
-    # ---- إدارة أنواع البالات ----
     st.subheader("📦 أنواع البالات")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -506,7 +515,6 @@ def admin_config_management_tab():
             else:
                 st.warning("⚠️ الرجاء إدخال نوع البالة")
 
-    # عرض الأنواع الحالية مع زر حذف
     if config["bale_types"]:
         for btype in config["bale_types"]:
             col1, col2 = st.columns([4, 1])
@@ -524,20 +532,18 @@ def admin_config_management_tab():
     else:
         st.warning("لا توجد أنواع بالات، الرجاء إضافة نوع")
 
-# ---------- تبويب إدارة المستخدمين (خاص بالمدير) ----------
+# ---------- تبويب إدارة المستخدمين ----------
 def admin_users_management_tab():
     st.header("👥 إدارة المستخدمين والصلاحيات")
     st.info("هنا يمكنك إضافة، تعديل، أو حذف المستخدمين وتحديد صلاحياتهم.")
 
     users = load_users()
 
-    # عرض المستخدمين الحاليين
     st.subheader("📋 قائمة المستخدمين")
     for username, info in users.items():
         with st.expander(f"👤 {username} (الدور: {info.get('role', 'viewer')})"):
             col1, col2 = st.columns(2)
 
-            # تغيير كلمة المرور
             with col1:
                 new_password = st.text_input(f"كلمة المرور الجديدة", type="password", key=f"pass_{username}")
                 if new_password:
@@ -549,14 +555,12 @@ def admin_users_management_tab():
                         else:
                             st.error("❌ فشل حفظ التغييرات")
 
-            # تغيير الدور
             with col2:
                 current_role = info.get("role", "viewer")
                 role_options = ["admin", "data_entry", "viewer"]
                 new_role = st.selectbox(f"الدور", role_options, index=role_options.index(current_role), key=f"role_{username}")
                 if new_role != info.get("role"):
                     users[username]["role"] = new_role
-                    # تحديث الصلاحيات تبعاً للدور
                     if new_role == "admin":
                         users[username]["permissions"] = {"all_sections": True}
                     else:
@@ -565,7 +569,6 @@ def admin_users_management_tab():
                         st.success(f"✅ تم تغيير دور {username} إلى {new_role}")
                         st.rerun()
 
-            # حذف المستخدم (ما عدا admin)
             if username != "admin":
                 st.markdown("---")
                 if st.button(f"🗑️ حذف المستخدم {username}", key=f"delete_{username}"):
@@ -578,7 +581,6 @@ def admin_users_management_tab():
                         else:
                             st.error("❌ فشل الحذف")
 
-    # إضافة مستخدم جديد
     st.markdown("---")
     st.subheader("➕ إضافة مستخدم جديد")
     with st.form("add_user_form"):
@@ -646,7 +648,6 @@ with st.sidebar:
 cotton_df = load_cotton_data()
 st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
 
-# حساب الصلاحيات للواجهة
 perms = get_user_permissions(
     st.session_state.get("user_role", "viewer"),
     st.session_state.get("user_permissions", {"all_sections": False})
@@ -656,15 +657,14 @@ tabs_list = []
 if perms["can_input"]:
     tabs_list.append("📥 إدخال البيانات")
 if perms["can_view_stats"]:
-    tabs_list.append("📊 عرض الإحصائيات")
+    tabs_list.append("📊 الإحصائيات المتقدمة")
 
-# إضافة تبويب إدارة المستخدمين للمدير فقط
 if is_admin(st.session_state.get("username")):
     tabs_list.append("👥 إدارة المستخدمين")
-    tabs_list.append("⚙️ إدارة التكوين")  # تبويب جديد لإدارة المشرفين والأنواع
+    tabs_list.append("⚙️ إدارة التكوين")
 
 if not tabs_list:
-    tabs_list = ["📊 عرض الإحصائيات"]
+    tabs_list = ["📊 الإحصائيات المتقدمة"]
 
 tabs = st.tabs(tabs_list)
 idx = 0
@@ -692,35 +692,141 @@ if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
                     st.error("أدخل وزناً صحيحاً")
     idx += 1
 
-# تبويب الإحصائيات
-if perms["can_view_stats"] and "📊 عرض الإحصائيات" in tabs_list:
+# تبويب الإحصائيات المتقدمة
+if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in tabs_list:
     with tabs[idx]:
-        st.header("الإحصائيات")
+        st.header("📊 الإحصائيات المتقدمة والرسوم البيانية")
         if cotton_df.empty:
-            st.warning("لا توجد بيانات")
+            st.warning("لا توجد بيانات لعرض الإحصائيات")
         else:
             col1, col2 = st.columns(2)
             with col1:
-                sd = st.date_input("من", datetime.now().date() - timedelta(days=7))
+                sd = st.date_input("من", datetime.now().date() - timedelta(days=30))
             with col2:
                 ed = st.date_input("إلى", datetime.now().date())
-            if st.button("عرض الإحصائيات"):
-                stats = generate_statistics(cotton_df, sd, ed)
-                if not stats.empty:
-                    st.dataframe(stats)
-                    total_w = stats['إجمالي الوزن'].sum()
-                    st.metric("إجمالي الوزن", f"{total_w:,.1f} كجم")
-                else:
+            
+            if st.button("📈 عرض الإحصائيات والرسوم"):
+                stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(cotton_df, sd, ed)
+                
+                if stats_by_type.empty:
                     st.warning("لا توجد بيانات في هذه الفترة")
+                else:
+                    # عرض المؤشرات الرئيسية
+                    total_weight = stats_by_type['إجمالي الوزن'].sum()
+                    total_bales = stats_by_type['عدد البالات'].sum()
+                    avg_weight = total_weight / total_bales if total_bales > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("إجمالي الوزن", f"{total_weight:,.1f} كجم")
+                    col2.metric("عدد البالات", f"{total_bales:,}")
+                    col3.metric("متوسط الوزن", f"{avg_weight:.1f} كجم")
+                    
+                    st.markdown("---")
+                    
+                    # رسم بياني خطي للوزن اليومي
+                    if daily_data is not None and not daily_data.empty:
+                        st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
+                        fig_line = px.line(
+                            daily_data, 
+                            x='التاريخ', 
+                            y='إجمالي الوزن',
+                            title='إجمالي الوزن اليومي',
+                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'التاريخ': 'التاريخ'},
+                            markers=True
+                        )
+                        fig_line.update_layout(
+                            xaxis_title="التاريخ",
+                            yaxis_title="الوزن (كجم)",
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_line, use_container_width=True)
+                        
+                        # رسم بياني خطي لعدد البالات اليومي
+                        st.subheader("📈 عدد البالات اليومي")
+                        fig_count = px.line(
+                            daily_data,
+                            x='التاريخ',
+                            y='عدد البالات',
+                            title='عدد البالات يومياً',
+                            labels={'عدد البالات': 'عدد البالات', 'التاريخ': 'التاريخ'},
+                            markers=True,
+                            color_discrete_sequence=['orange']
+                        )
+                        fig_count.update_layout(
+                            xaxis_title="التاريخ",
+                            yaxis_title="عدد البالات",
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_count, use_container_width=True)
+                    
+                    st.markdown("---")
+                    
+                    # إحصائيات حسب نوع البالة - جدول ورسم بياني
+                    st.subheader("📊 توزيع البالات حسب النوع")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        fig_bar = px.bar(
+                            stats_by_type,
+                            x='نوع البالة',
+                            y='إجمالي الوزن',
+                            title='إجمالي الوزن حسب نوع البالة',
+                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'نوع البالة': 'نوع البالة'},
+                            color='نوع البالة',
+                            text='إجمالي الوزن'
+                        )
+                        fig_bar.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+                        fig_bar.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                    with col2:
+                        st.dataframe(stats_by_type, use_container_width=True)
+                    
+                    st.markdown("---")
+                    
+                    # إحصائيات حسب المشرف
+                    st.subheader("👨‍🏭 أداء المشرفين")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        fig_sup = px.bar(
+                            stats_by_supervisor,
+                            x='المشرف',
+                            y='إجمالي الوزن',
+                            title='إجمالي الوزن حسب المشرف',
+                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'المشرف': 'المشرف'},
+                            color='المشرف',
+                            text='إجمالي الوزن'
+                        )
+                        fig_sup.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+                        fig_sup.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
+                        st.plotly_chart(fig_sup, use_container_width=True)
+                    with col2:
+                        st.dataframe(stats_by_supervisor, use_container_width=True)
+                    
+                    st.markdown("---")
+                    
+                    # إحصائيات حسب الوردية
+                    st.subheader("🕒 توزيع الإنتاج حسب الوردية")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        fig_shift = px.pie(
+                            stats_by_shift,
+                            names='الوردية',
+                            values='إجمالي الوزن',
+                            title='نسبة الإنتاج حسب الوردية',
+                            hole=0.3
+                        )
+                        fig_shift.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig_shift, use_container_width=True)
+                    with col2:
+                        st.dataframe(stats_by_shift, use_container_width=True)
     idx += 1
 
-# تبويب إدارة المستخدمين (للمدير فقط)
+# تبويب إدارة المستخدمين
 if is_admin(st.session_state.get("username")):
     with tabs[idx]:
         admin_users_management_tab()
     idx += 1
 
-# تبويب إدارة التكوين (المشرفين وأنواع البالات) - للمدير فقط
+# تبويب إدارة التكوين
 if is_admin(st.session_state.get("username")):
     with tabs[idx]:
         admin_config_management_tab()
