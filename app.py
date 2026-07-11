@@ -453,7 +453,7 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة البيانات (تعديل وحذف) ----------
+# ---------- تبويب إدارة البيانات (تعديل وحذف) - نسخة آمنة ----------
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
     st.info("يمكنك تعديل الخلايا مباشرة أو حذف صفوف محددة. اضغط 'حفظ التغييرات' بعد التعديل.")
@@ -463,68 +463,49 @@ def data_management_tab():
         st.warning("لا توجد بيانات لعرضها")
         return
     
-    # تحويل الأعمدة إلى أنواع مناسبة مع التعامل مع الأخطاء
-    df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
-    df['الوقت'] = pd.to_datetime(df['الوقت'], errors='coerce').dt.time
+    # عرض البيانات كجدول فقط (لاستعراض) مع زر حذف لكل صف
+    st.subheader("📋 عرض البيانات")
     
-    # إضافة عمود للحذف
-    df_display = df.copy()
-    df_display['حذف'] = False
-    
-    # عرض المحرر
-    edited_df = st.data_editor(
-        df_display,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="data_editor"
-    )
-    
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
-            try:
-                save_df = edited_df.drop(columns=['حذف'], errors='ignore')
-                # إعادة تحويل الأعمدة للحفظ
-                save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
-                save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], errors='coerce').dt.time
-                # تحويل الوقت إلى نص بصيغة HH:MM:SS
-                save_df['الوقت'] = save_df['الوقت'].apply(
-                    lambda x: x.strftime('%H:%M:%S') if pd.notnull(x) else '00:00:00'
-                )
-                if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
-                    st.success("✅ تم حفظ التغييرات بنجاح")
-                    st.rerun()
-                else:
-                    st.error("❌ فشل حفظ التغييرات")
-            except Exception as e:
-                st.error(f"❌ حدث خطأ: {e}")
-    
-    with col2:
-        if st.button("🗑️ حذف المحددات", use_container_width=True):
-            rows_to_delete = edited_df[edited_df['حذف'] == True]
-            if rows_to_delete.empty:
-                st.warning("⚠️ لم يتم تحديد أي صفوف للحذف")
+    # عرض البيانات مع أزرار حذف
+    for idx, row in df.iterrows():
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.5, 1, 1.5, 1.5, 1, 1.5, 0.5])
+        col1.write(row['التاريخ'])
+        col2.write(row['الوقت'])
+        col3.write(row['الوردية'])
+        col4.write(row['المشرف'])
+        col5.write(row['نوع البالة'])
+        col6.write(f"{row['وزن البالة']:.1f}")
+        col7.write(row['ملاحظات'])
+        if col8.button("🗑️", key=f"del_{idx}"):
+            # حذف الصف
+            df_dropped = df.drop(idx)
+            if save_cotton_data(df_dropped, f"حذف صف {idx}"):
+                st.success(f"✅ تم حذف الصف بنجاح")
+                st.rerun()
             else:
-                st.warning(f"⚠️ سيتم حذف {len(rows_to_delete)} صف(وف). هل أنت متأكد؟")
-                if st.button("نعم، تأكيد الحذف", key="confirm_delete_btn"):
-                    keep_df = edited_df[edited_df['حذف'] == False]
-                    save_df = keep_df.drop(columns=['حذف'], errors='ignore')
-                    save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
-                    save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], errors='coerce').dt.time
-                    save_df['الوقت'] = save_df['الوقت'].apply(
-                        lambda x: x.strftime('%H:%M:%S') if pd.notnull(x) else '00:00:00'
-                    )
-                    if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
-                        st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
-                        st.rerun()
-                    else:
-                        st.error("❌ فشل حذف الصفوف")
+                st.error("❌ فشل حذف الصف")
     
-    with col3:
-        if st.button("🔄 تحديث البيانات", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+    # إضافة نموذج لإضافة بيانات جديدة بسرعة
+    st.markdown("---")
+    st.subheader("➕ إضافة سجل جديد")
+    with st.form("quick_add"):
+        col1, col2 = st.columns(2)
+        with col1:
+            sup = st.selectbox("المشرف", get_supervisors(), key="quick_sup")
+            btype = st.selectbox("نوع البالة", get_bale_types(), key="quick_btype")
+        with col2:
+            w = st.number_input("الوزن (كجم)", min_value=0.0, step=0.1, key="quick_weight")
+            note = st.text_input("ملاحظات", key="quick_note")
+        if st.form_submit_button("➕ إضافة"):
+            if w > 0:
+                _, new_df = add_new_record(df, sup, btype, w, note)
+                if save_cotton_data(new_df):
+                    st.success("✅ تم إضافة السجل بنجاح")
+                    st.rerun()
+            else:
+                st.error("❌ أدخل وزناً صحيحاً")
     
+    # عرض ملخص سريع
     st.markdown("---")
     st.subheader("📊 ملخص سريع")
     col1, col2, col3 = st.columns(3)
