@@ -463,29 +463,18 @@ def data_management_tab():
         st.warning("لا توجد بيانات لعرضها")
         return
     
-    # عرض البيانات مع محرر
-    st.subheader("📋 البيانات الحالية")
+    # تحويل الأعمدة إلى أنواع مناسبة
+    df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
+    df['الوقت'] = pd.to_datetime(df['الوقت'], format='%H:%M:%S').dt.time
     
-    # إضافة عمود 'تحديد للحذف' مع checkbox
-    # نضيف العمود في البيانات المعروضة
-    df_with_selection = df.copy()
-    df_with_selection['حذف'] = False
+    # إضافة عمود للحذف
+    df_display = df.copy()
+    df_display['حذف'] = False
     
-    # استخدام data_editor مع إمكانية التعديل
+    # عرض المحرر بدون column_config معقد
     edited_df = st.data_editor(
-        df_with_selection,
+        df_display,
         num_rows="dynamic",
-        column_config={
-            "التاريخ": st.column_config.DateColumn("التاريخ", required=True),
-            "الوقت": st.column_config.TimeColumn("الوقت", required=True),
-            "الوردية": st.column_config.SelectboxColumn("الوردية", options=list(APP_CONFIG["SHIFTS"].keys()), required=True),
-            "المشرف": st.column_config.SelectboxColumn("المشرف", options=get_supervisors(), required=True),
-            "نوع البالة": st.column_config.SelectboxColumn("نوع البالة", options=get_bale_types(), required=True),
-            "وزن البالة": st.column_config.NumberColumn("الوزن (كجم)", min_value=0.0, step=0.1, required=True),
-            "ملاحظات": st.column_config.TextColumn("ملاحظات"),
-            "حذف": st.column_config.CheckboxColumn("حذف"),
-        },
-        hide_index=False,
         use_container_width=True,
         key="data_editor"
     )
@@ -493,10 +482,12 @@ def data_management_tab():
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
-            # معالجة التعديلات
             try:
-                # إزالة عمود 'حذف' للحفظ
+                # إزالة عمود 'حذف'
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
+                # إعادة تحويل الأعمدة إلى النوع المناسب للحفظ
+                save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
+                save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], format='%H:%M:%S').dt.time
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.success("✅ تم حفظ التغييرات بنجاح")
                     st.rerun()
@@ -507,18 +498,16 @@ def data_management_tab():
     
     with col2:
         if st.button("🗑️ حذف المحددات", use_container_width=True):
-            # التحقق من وجود صفوف محددة للحذف
             rows_to_delete = edited_df[edited_df['حذف'] == True]
             if rows_to_delete.empty:
                 st.warning("⚠️ لم يتم تحديد أي صفوف للحذف")
             else:
-                # تأكيد الحذف
                 st.warning(f"⚠️ سيتم حذف {len(rows_to_delete)} صف(وف). هل أنت متأكد؟")
-                confirm = st.checkbox("نعم، أنا متأكد", key="confirm_delete")
-                if confirm:
-                    # حذف الصفوف
+                if st.button("نعم، تأكيد الحذف", key="confirm_delete_btn"):
                     keep_df = edited_df[edited_df['حذف'] == False]
                     save_df = keep_df.drop(columns=['حذف'], errors='ignore')
+                    save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
+                    save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], format='%H:%M:%S').dt.time
                     if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
                         st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
                         st.rerun()
@@ -530,7 +519,6 @@ def data_management_tab():
             st.cache_data.clear()
             st.rerun()
     
-    # عرض إحصائيات سريعة عن البيانات الحالية
     st.markdown("---")
     st.subheader("📊 ملخص سريع")
     col1, col2, col3 = st.columns(3)
@@ -744,7 +732,7 @@ perms = get_user_permissions(
 tabs_list = []
 if perms["can_input"]:
     tabs_list.append("📥 إدخال البيانات")
-    tabs_list.append("📝 إدارة البيانات")  # تبويب جديد لإدارة البيانات (تعديل وحذف)
+    tabs_list.append("📝 إدارة البيانات")
 if perms["can_view_stats"]:
     tabs_list.append("📊 الإحصائيات المتقدمة")
 
@@ -781,7 +769,7 @@ if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
                     st.error("❌ أدخل وزناً صحيحاً")
     idx += 1
 
-# تبويب إدارة البيانات (تعديل وحذف)
+# تبويب إدارة البيانات
 if perms["can_input"] and "📝 إدارة البيانات" in tabs_list:
     with tabs[idx]:
         data_management_tab()
