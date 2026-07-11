@@ -394,7 +394,8 @@ def add_new_record(df, supervisor, bale_type, weight, notes=""):
     }
     return new, pd.concat([df, pd.DataFrame([new])], ignore_index=True)
 
-def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_shift=None):
+# تعديل دالة generate_statistics لاستخدام filter_supervisor بدلاً من filter_shift
+def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_supervisor=None):
     if df.empty:
         return pd.DataFrame(), None, None, None
     df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
@@ -406,8 +407,8 @@ def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_
     if filter_bale_type and filter_bale_type != "الكل":
         fdf = fdf[fdf['نوع البالة'] == filter_bale_type]
     
-    if filter_shift and filter_shift != "الكل":
-        fdf = fdf[fdf['الوردية'] == filter_shift]
+    if filter_supervisor and filter_supervisor != "الكل":
+        fdf = fdf[fdf['المشرف'] == filter_supervisor]
     
     if fdf.empty:
         return pd.DataFrame(), None, None, None
@@ -654,7 +655,7 @@ def admin_config_management_tab():
     else:
         st.warning("لا توجد أنواع بالات، الرجاء إضافة نوع")
 
-# ---------- تبويب إدارة المستخدمين ----------
+# ---------- تبويب إدارة المستخدمين (معدل: تأكيد الحذف بكلمة "تم") ----------
 def admin_users_management_tab():
     st.header("👥 إدارة المستخدمين والصلاحيات")
     st.info("هنا يمكنك إضافة، تعديل، أو حذف المستخدمين وتحديد صلاحياتهم.")
@@ -694,14 +695,16 @@ def admin_users_management_tab():
             if username != "admin":
                 st.markdown("---")
                 if st.button(f"🗑️ حذف المستخدم {username}", key=f"delete_{username}"):
-                    confirm = st.text_input(f"YES", key=f"confirm_{username}")
-                    if confirm == "YES":
+                    confirm = st.text_input(f"تأكيد الحذف - اكتب 'تم'", key=f"confirm_{username}")
+                    if confirm == "تم":
                         del users[username]
                         if save_users(users):
                             st.success(f"✅ تم حذف {username}")
                             st.rerun()
                         else:
                             st.error("❌ فشل الحذف")
+                    elif confirm:
+                        st.warning("⚠️ أكتب 'تم' لتأكيد الحذف")
 
     st.markdown("---")
     st.subheader("➕ إضافة مستخدم جديد")
@@ -816,7 +819,7 @@ if perms["can_input"] and "📝 إدارة البيانات" in tabs_list:
         data_management_tab()
     idx += 1
 
-# تبويب الإحصائيات المتقدمة
+# تبويب الإحصائيات المتقدمة (معدل: استبدال فلتر الوردية بفلتر المشرف)
 if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in tabs_list:
     with tabs[idx]:
         st.header("📊 الإحصائيات المتقدمة والرسوم البيانية")
@@ -835,15 +838,17 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                 bale_options = ["الكل"] + get_bale_types()
                 selected_bale = st.selectbox("نوع البالة", bale_options, key="filter_bale")
             with col2:
-                shift_options = ["الكل"] + list(APP_CONFIG["SHIFTS"].keys())
-                selected_shift = st.selectbox("الوردية", shift_options, key="filter_shift")
+                # استبدلنا فلتر الوردية بفلتر المشرف
+                supervisor_options = ["الكل"] + get_supervisors()
+                selected_supervisor = st.selectbox("المشرف", supervisor_options, key="filter_supervisor")
             with col3:
                 show_charts = st.checkbox("📈 إظهار الرسوم البيانية", value=True)
 
             if st.button("📈 عرض الإحصائيات", type="primary"):
                 stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(
-                    cotton_df, sd, ed, selected_bale if selected_bale != "الكل" else None,
-                    selected_shift if selected_shift != "الكل" else None
+                    cotton_df, sd, ed,
+                    filter_bale_type=selected_bale if selected_bale != "الكل" else None,
+                    filter_supervisor=selected_supervisor if selected_supervisor != "الكل" else None
                 )
 
                 if stats_by_type.empty:
