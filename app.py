@@ -463,15 +463,15 @@ def data_management_tab():
         st.warning("لا توجد بيانات لعرضها")
         return
     
-    # تحويل الأعمدة إلى أنواع مناسبة
-    df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
-    df['الوقت'] = pd.to_datetime(df['الوقت'], format='%H:%M:%S').dt.time
+    # تحويل الأعمدة إلى أنواع مناسبة مع التعامل مع الأخطاء
+    df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
+    df['الوقت'] = pd.to_datetime(df['الوقت'], errors='coerce').dt.time
     
     # إضافة عمود للحذف
     df_display = df.copy()
     df_display['حذف'] = False
     
-    # عرض المحرر بدون column_config معقد
+    # عرض المحرر
     edited_df = st.data_editor(
         df_display,
         num_rows="dynamic",
@@ -483,11 +483,14 @@ def data_management_tab():
     with col1:
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
             try:
-                # إزالة عمود 'حذف'
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
-                # إعادة تحويل الأعمدة إلى النوع المناسب للحفظ
+                # إعادة تحويل الأعمدة للحفظ
                 save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
-                save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], format='%H:%M:%S').dt.time
+                save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], errors='coerce').dt.time
+                # تحويل الوقت إلى نص بصيغة HH:MM:SS
+                save_df['الوقت'] = save_df['الوقت'].apply(
+                    lambda x: x.strftime('%H:%M:%S') if pd.notnull(x) else '00:00:00'
+                )
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.success("✅ تم حفظ التغييرات بنجاح")
                     st.rerun()
@@ -507,7 +510,10 @@ def data_management_tab():
                     keep_df = edited_df[edited_df['حذف'] == False]
                     save_df = keep_df.drop(columns=['حذف'], errors='ignore')
                     save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ']).dt.date
-                    save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], format='%H:%M:%S').dt.time
+                    save_df['الوقت'] = pd.to_datetime(save_df['الوقت'], errors='coerce').dt.time
+                    save_df['الوقت'] = save_df['الوقت'].apply(
+                        lambda x: x.strftime('%H:%M:%S') if pd.notnull(x) else '00:00:00'
+                    )
                     if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
                         st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
                         st.rerun()
