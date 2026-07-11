@@ -38,9 +38,69 @@ APP_CONFIG = {
 
 USERS_FILE = "users.json"
 STATE_FILE = "state.json"
+CONFIG_FILE = "config.json"  # ملف جديد لتخزين المشرفين وأنواع البالات
 SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
+
+# ---------- دوال إدارة التكوين (المشرفين وأنواع البالات) ----------
+def load_config():
+    """تحميل قوائم المشرفين وأنواع البالات من ملف config.json"""
+    default_config = {
+        "supervisors": ["انسT.A", "عبدالحميدT.B", "محمود فتحيT.C", "احمد عبالعزيزT.D"],
+        "bale_types": ["قماش", "تراب", "هبوه دست", "اسطبات تدویر", "برم", "برم انفاق", "بلاستيك",
+                       "هبوه تنظيف", "انفاق", "شرق الغزل", "تمشيط غير مغلف", "تمشيط مغلف", "مكس", "كرد", "قطن خام", "ملح"]
+    }
+    if not os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_config, f, indent=4, ensure_ascii=False)
+        return default_config
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f)
+            # التأكد من وجود المفاتيح
+            if "supervisors" not in config:
+                config["supervisors"] = default_config["supervisors"]
+            if "bale_types" not in config:
+                config["bale_types"] = default_config["bale_types"]
+            return config
+    except Exception as e:
+        st.error(f"خطأ في تحميل config.json: {e}")
+        return default_config
+
+def save_config(config):
+    """حفظ التكوين ورفعه إلى GitHub إن أمكن"""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        # رفع إلى GitHub
+        token = st.secrets.get("github", {}).get("token", None)
+        if token and GITHUB_AVAILABLE:
+            try:
+                g = Github(token)
+                repo = g.get_repo(APP_CONFIG["REPO_NAME"])
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    content = f.read()
+                try:
+                    contents = repo.get_contents(CONFIG_FILE, ref=APP_CONFIG["BRANCH"])
+                    repo.update_file(CONFIG_FILE, "تحديث التكوين", content, contents.sha, branch=APP_CONFIG["BRANCH"])
+                except:
+                    repo.create_file(CONFIG_FILE, "إنشاء ملف التكوين", content, branch=APP_CONFIG["BRANCH"])
+            except:
+                pass
+        return True
+    except Exception as e:
+        st.error(f"خطأ في حفظ config.json: {e}")
+        return False
+
+# تعديل دوال get_supervisors و get_bale_types لقراءة من config
+def get_supervisors():
+    config = load_config()
+    return config.get("supervisors", [])
+
+def get_bale_types():
+    config = load_config()
+    return config.get("bale_types", [])
 
 # ---------- دوال المستخدمين والجلسات (معدلة لدعم الصلاحيات المتقدمة) ----------
 def load_users():
@@ -324,12 +384,9 @@ def get_current_shift():
             return name
     return "الثالثه"
 
-def get_supervisors():
-    return ["انسT.A", "عبدالحميدT.B", "محمود فتحيT.C", "احمد عبالعزيزT.D"]
-
-def get_bale_types():
-    return ["قماش", "تراب", "هبوه دست", "اسطبات تدویر", "برم", "برم انفاق", "بلاستيك",
-            "هبوه تنظيف", "انفاق", "شرق الغزل", "تمشيط غير مغلف", "تمشيط مغلف", "مكس", "كرد", "قطن خام", "ملح"]
+# تم تعديل هاتين الدالتين لقراءة من config
+# def get_supervisors():  موجودة أعلاه
+# def get_bale_types():   موجودة أعلاه
 
 def add_new_record(df, supervisor, bale_type, weight, notes=""):
     now = datetime.now()
@@ -381,6 +438,91 @@ def get_user_permissions(role, perms):
             return {"can_input": False, "can_view_stats": True}
         else:
             return {"can_input": False, "can_view_stats": True}
+
+# ---------- تبويب إدارة التكوين (المشرفين وأنواع البالات) ----------
+def admin_config_management_tab():
+    st.header("⚙️ إدارة المشرفين وأنواع البالات")
+    st.info("هنا يمكنك إضافة أو حذف المشرفين وأنواع البالات. التغييرات تحفظ محلياً وعلى GitHub.")
+
+    config = load_config()
+    
+    # ---- إدارة المشرفين ----
+    st.subheader("👨‍🏭 المشرفون")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        new_supervisor = st.text_input("إضافة مشرف جديد", key="new_supervisor")
+    with col2:
+        if st.button("➕ إضافة مشرف", key="add_supervisor_btn"):
+            if new_supervisor and new_supervisor.strip():
+                if new_supervisor.strip() not in config["supervisors"]:
+                    config["supervisors"].append(new_supervisor.strip())
+                    if save_config(config):
+                        st.success(f"✅ تم إضافة المشرف {new_supervisor.strip()}")
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل حفظ التغييرات")
+                else:
+                    st.warning("⚠️ هذا المشرف موجود بالفعل")
+            else:
+                st.warning("⚠️ الرجاء إدخال اسم المشرف")
+
+    # عرض المشرفين الحاليين مع زر حذف
+    if config["supervisors"]:
+        for sup in config["supervisors"]:
+            col1, col2 = st.columns([4, 1])
+            col1.write(f"• {sup}")
+            if col2.button("🗑️", key=f"del_sup_{sup}"):
+                if len(config["supervisors"]) <= 1:
+                    st.warning("⚠️ لا يمكن حذف آخر مشرف، يجب أن يكون هناك مشرف واحد على الأقل")
+                else:
+                    config["supervisors"].remove(sup)
+                    if save_config(config):
+                        st.success(f"✅ تم حذف المشرف {sup}")
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل الحذف")
+    else:
+        st.warning("لا يوجد مشرفون، الرجاء إضافة مشرف")
+
+    st.markdown("---")
+    
+    # ---- إدارة أنواع البالات ----
+    st.subheader("📦 أنواع البالات")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        new_bale = st.text_input("إضافة نوع بالة جديد", key="new_bale")
+    with col2:
+        if st.button("➕ إضافة نوع", key="add_bale_btn"):
+            if new_bale and new_bale.strip():
+                if new_bale.strip() not in config["bale_types"]:
+                    config["bale_types"].append(new_bale.strip())
+                    if save_config(config):
+                        st.success(f"✅ تم إضافة نوع البالة {new_bale.strip()}")
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل حفظ التغييرات")
+                else:
+                    st.warning("⚠️ هذا النوع موجود بالفعل")
+            else:
+                st.warning("⚠️ الرجاء إدخال نوع البالة")
+
+    # عرض الأنواع الحالية مع زر حذف
+    if config["bale_types"]:
+        for btype in config["bale_types"]:
+            col1, col2 = st.columns([4, 1])
+            col1.write(f"• {btype}")
+            if col2.button("🗑️", key=f"del_bale_{btype}"):
+                if len(config["bale_types"]) <= 1:
+                    st.warning("⚠️ لا يمكن حذف آخر نوع، يجب أن يكون هناك نوع واحد على الأقل")
+                else:
+                    config["bale_types"].remove(btype)
+                    if save_config(config):
+                        st.success(f"✅ تم حذف نوع البالة {btype}")
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل الحذف")
+    else:
+        st.warning("لا توجد أنواع بالات، الرجاء إضافة نوع")
 
 # ---------- تبويب إدارة المستخدمين (خاص بالمدير) ----------
 def admin_users_management_tab():
@@ -519,6 +661,7 @@ if perms["can_view_stats"]:
 # إضافة تبويب إدارة المستخدمين للمدير فقط
 if is_admin(st.session_state.get("username")):
     tabs_list.append("👥 إدارة المستخدمين")
+    tabs_list.append("⚙️ إدارة التكوين")  # تبويب جديد لإدارة المشرفين والأنواع
 
 if not tabs_list:
     tabs_list = ["📊 عرض الإحصائيات"]
@@ -575,4 +718,10 @@ if perms["can_view_stats"] and "📊 عرض الإحصائيات" in tabs_list:
 if is_admin(st.session_state.get("username")):
     with tabs[idx]:
         admin_users_management_tab()
+    idx += 1
+
+# تبويب إدارة التكوين (المشرفين وأنواع البالات) - للمدير فقط
+if is_admin(st.session_state.get("username")):
+    with tabs[idx]:
+        admin_config_management_tab()
     idx += 1
