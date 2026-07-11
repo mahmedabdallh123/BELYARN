@@ -9,8 +9,9 @@ import re
 from datetime import datetime, timedelta
 from base64 import b64decode
 from difflib import get_close_matches
-import plotly.express as px
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
 
 # GitHub
 try:
@@ -47,7 +48,6 @@ GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/
 
 # ---------- دوال إدارة التكوين (المشرفين وأنواع البالات) ----------
 def load_config():
-    """تحميل قوائم المشرفين وأنواع البالات من ملف config.json"""
     default_config = {
         "supervisors": ["انسT.A", "عبدالحميدT.B", "محمود فتحيT.C", "احمد عبالعزيزT.D"],
         "bale_types": ["قماش", "تراب", "هبوه دست", "اسطبات تدویر", "برم", "برم انفاق", "بلاستيك",
@@ -399,29 +399,24 @@ def generate_statistics(df, start_date, end_date):
     if fdf.empty:
         return pd.DataFrame(), None, None, None
     
-    # إحصائيات تفصيلية
-    # 1. حسب نوع البالة
     stats_by_type = fdf.groupby('نوع البالة').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_type = stats_by_type.reset_index()
     
-    # 2. حسب المشرف
     stats_by_supervisor = fdf.groupby('المشرف').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_supervisor.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_supervisor = stats_by_supervisor.reset_index()
     
-    # 3. حسب الوردية
     stats_by_shift = fdf.groupby('الوردية').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_shift = stats_by_shift.reset_index()
     
-    # 4. البيانات اليومية للرسوم البيانية
     daily_data = fdf.groupby('التاريخ').agg({
         'وزن البالة': ['sum', 'count']
     }).round(2)
@@ -711,7 +706,7 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                 if stats_by_type.empty:
                     st.warning("لا توجد بيانات في هذه الفترة")
                 else:
-                    # عرض المؤشرات الرئيسية
+                    # المؤشرات الرئيسية
                     total_weight = stats_by_type['إجمالي الوزن'].sum()
                     total_bales = stats_by_type['عدد البالات'].sum()
                     avg_weight = total_weight / total_bales if total_bales > 0 else 0
@@ -723,41 +718,34 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                     
                     st.markdown("---")
                     
-                    # رسم بياني خطي للوزن اليومي
+                    # الرسم البياني الخطي للوزن اليومي
                     if daily_data is not None and not daily_data.empty:
                         st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
-                        fig_line = px.line(
-                            daily_data, 
-                            x='التاريخ', 
-                            y='إجمالي الوزن',
-                            title='إجمالي الوزن اليومي',
-                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'التاريخ': 'التاريخ'},
-                            markers=True
-                        )
-                        fig_line.update_layout(
-                            xaxis_title="التاريخ",
-                            yaxis_title="الوزن (كجم)",
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_line, use_container_width=True)
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax.plot(daily_data['التاريخ'], daily_data['إجمالي الوزن'], marker='o', linestyle='-', color='blue')
+                        ax.set_xlabel('التاريخ')
+                        ax.set_ylabel('الوزن (كجم)')
+                        ax.set_title('إجمالي الوزن اليومي')
+                        ax.grid(True, alpha=0.3)
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                        ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(daily_data)//10)))
+                        plt.xticks(rotation=45)
+                        st.pyplot(fig)
+                        plt.close()
                         
-                        # رسم بياني خطي لعدد البالات اليومي
+                        # الرسم البياني الخطي لعدد البالات اليومي
                         st.subheader("📈 عدد البالات اليومي")
-                        fig_count = px.line(
-                            daily_data,
-                            x='التاريخ',
-                            y='عدد البالات',
-                            title='عدد البالات يومياً',
-                            labels={'عدد البالات': 'عدد البالات', 'التاريخ': 'التاريخ'},
-                            markers=True,
-                            color_discrete_sequence=['orange']
-                        )
-                        fig_count.update_layout(
-                            xaxis_title="التاريخ",
-                            yaxis_title="عدد البالات",
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_count, use_container_width=True)
+                        fig2, ax2 = plt.subplots(figsize=(10, 5))
+                        ax2.plot(daily_data['التاريخ'], daily_data['عدد البالات'], marker='s', linestyle='-', color='orange')
+                        ax2.set_xlabel('التاريخ')
+                        ax2.set_ylabel('عدد البالات')
+                        ax2.set_title('عدد البالات يومياً')
+                        ax2.grid(True, alpha=0.3)
+                        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                        ax2.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(daily_data)//10)))
+                        plt.xticks(rotation=45)
+                        st.pyplot(fig2)
+                        plt.close()
                     
                     st.markdown("---")
                     
@@ -765,18 +753,20 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                     st.subheader("📊 توزيع البالات حسب النوع")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_bar = px.bar(
-                            stats_by_type,
-                            x='نوع البالة',
-                            y='إجمالي الوزن',
-                            title='إجمالي الوزن حسب نوع البالة',
-                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'نوع البالة': 'نوع البالة'},
-                            color='نوع البالة',
-                            text='إجمالي الوزن'
-                        )
-                        fig_bar.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-                        fig_bar.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-                        st.plotly_chart(fig_bar, use_container_width=True)
+                        fig_bar, ax_bar = plt.subplots(figsize=(10, 5))
+                        bars = ax_bar.bar(stats_by_type['نوع البالة'], stats_by_type['إجمالي الوزن'], color='skyblue')
+                        ax_bar.set_xlabel('نوع البالة')
+                        ax_bar.set_ylabel('الوزن (كجم)')
+                        ax_bar.set_title('إجمالي الوزن حسب نوع البالة')
+                        ax_bar.grid(True, alpha=0.3, axis='y')
+                        # إضافة الأرقام على الأعمدة
+                        for bar in bars:
+                            height = bar.get_height()
+                            ax_bar.text(bar.get_x() + bar.get_width()/2., height,
+                                        f'{height:.1f}', ha='center', va='bottom', fontsize=9)
+                        plt.xticks(rotation=45, ha='right')
+                        st.pyplot(fig_bar)
+                        plt.close()
                     with col2:
                         st.dataframe(stats_by_type, use_container_width=True)
                     
@@ -786,36 +776,33 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                     st.subheader("👨‍🏭 أداء المشرفين")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_sup = px.bar(
-                            stats_by_supervisor,
-                            x='المشرف',
-                            y='إجمالي الوزن',
-                            title='إجمالي الوزن حسب المشرف',
-                            labels={'إجمالي الوزن': 'الوزن (كجم)', 'المشرف': 'المشرف'},
-                            color='المشرف',
-                            text='إجمالي الوزن'
-                        )
-                        fig_sup.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-                        fig_sup.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-                        st.plotly_chart(fig_sup, use_container_width=True)
+                        fig_sup, ax_sup = plt.subplots(figsize=(10, 5))
+                        bars_sup = ax_sup.bar(stats_by_supervisor['المشرف'], stats_by_supervisor['إجمالي الوزن'], color='lightgreen')
+                        ax_sup.set_xlabel('المشرف')
+                        ax_sup.set_ylabel('الوزن (كجم)')
+                        ax_sup.set_title('إجمالي الوزن حسب المشرف')
+                        ax_sup.grid(True, alpha=0.3, axis='y')
+                        for bar in bars_sup:
+                            height = bar.get_height()
+                            ax_sup.text(bar.get_x() + bar.get_width()/2., height,
+                                        f'{height:.1f}', ha='center', va='bottom', fontsize=9)
+                        plt.xticks(rotation=45, ha='right')
+                        st.pyplot(fig_sup)
+                        plt.close()
                     with col2:
                         st.dataframe(stats_by_supervisor, use_container_width=True)
                     
                     st.markdown("---")
                     
-                    # إحصائيات حسب الوردية
+                    # إحصائيات حسب الوردية - رسم بياني دائري
                     st.subheader("🕒 توزيع الإنتاج حسب الوردية")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        fig_shift = px.pie(
-                            stats_by_shift,
-                            names='الوردية',
-                            values='إجمالي الوزن',
-                            title='نسبة الإنتاج حسب الوردية',
-                            hole=0.3
-                        )
-                        fig_shift.update_traces(textposition='inside', textinfo='percent+label')
-                        st.plotly_chart(fig_shift, use_container_width=True)
+                        fig_pie, ax_pie = plt.subplots(figsize=(8, 8))
+                        ax_pie.pie(stats_by_shift['إجمالي الوزن'], labels=stats_by_shift['الوردية'], autopct='%1.1f%%', startangle=90)
+                        ax_pie.set_title('نسبة الإنتاج حسب الوردية')
+                        st.pyplot(fig_pie)
+                        plt.close()
                     with col2:
                         st.dataframe(stats_by_shift, use_container_width=True)
     idx += 1
