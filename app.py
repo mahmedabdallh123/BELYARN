@@ -387,7 +387,8 @@ def add_new_record(df, supervisor, bale_type, weight, notes=""):
     }
     return new, pd.concat([df, pd.DataFrame([new])], ignore_index=True)
 
-def generate_statistics(df, start_date, end_date):
+def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_shift=None):
+    """حساب الإحصائيات مع إمكانية التصفية حسب نوع البالة والوردية"""
     if df.empty:
         return pd.DataFrame(), None, None, None
     df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
@@ -395,13 +396,32 @@ def generate_statistics(df, start_date, end_date):
     fdf = df[mask].copy()
     if fdf.empty:
         return pd.DataFrame(), None, None, None
+    
+    # تطبيق التصفية حسب نوع البالة
+    if filter_bale_type and filter_bale_type != "الكل":
+        fdf = fdf[fdf['نوع البالة'] == filter_bale_type]
+    
+    # تطبيق التصفية حسب الوردية
+    if filter_shift and filter_shift != "الكل":
+        fdf = fdf[fdf['الوردية'] == filter_shift]
+    
+    if fdf.empty:
+        return pd.DataFrame(), None, None, None
 
-    # 1. حسب نوع البالة
-    stats_by_type = fdf.groupby('نوع البالة').agg({
-        'وزن البالة': ['count', 'sum', 'mean']
-    }).round(2)
-    stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-    stats_by_type = stats_by_type.reset_index()
+    # 1. حسب نوع البالة (إذا لم يتم التصفية بنوع معين)
+    if filter_bale_type and filter_bale_type != "الكل":
+        # في حالة تصفية نوع معين، نعرض إحصاء واحد فقط لهذا النوع
+        stats_by_type = fdf.groupby('نوع البالة').agg({
+            'وزن البالة': ['count', 'sum', 'mean']
+        }).round(2)
+        stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+        stats_by_type = stats_by_type.reset_index()
+    else:
+        stats_by_type = fdf.groupby('نوع البالة').agg({
+            'وزن البالة': ['count', 'sum', 'mean']
+        }).round(2)
+        stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+        stats_by_type = stats_by_type.reset_index()
 
     # 2. حسب المشرف
     stats_by_supervisor = fdf.groupby('المشرف').agg({
@@ -410,12 +430,19 @@ def generate_statistics(df, start_date, end_date):
     stats_by_supervisor.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_supervisor = stats_by_supervisor.reset_index()
 
-    # 3. حسب الوردية
-    stats_by_shift = fdf.groupby('الوردية').agg({
-        'وزن البالة': ['count', 'sum', 'mean']
-    }).round(2)
-    stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-    stats_by_shift = stats_by_shift.reset_index()
+    # 3. حسب الوردية (إذا لم يتم التصفية بوردة معينة)
+    if filter_shift and filter_shift != "الكل":
+        stats_by_shift = fdf.groupby('الوردية').agg({
+            'وزن البالة': ['count', 'sum', 'mean']
+        }).round(2)
+        stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+        stats_by_shift = stats_by_shift.reset_index()
+    else:
+        stats_by_shift = fdf.groupby('الوردية').agg({
+            'وزن البالة': ['count', 'sum', 'mean']
+        }).round(2)
+        stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+        stats_by_shift = stats_by_shift.reset_index()
 
     # 4. البيانات اليومية للرسوم البيانية
     daily_data = fdf.groupby('التاريخ').agg({
@@ -702,15 +729,33 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
             with col2:
                 ed = st.date_input("إلى", datetime.now().date())
 
-            if st.button("📈 عرض الإحصائيات والرسوم"):
-                stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(cotton_df, sd, ed)
+            # خيارات التصفية
+            st.subheader("🔍 خيارات التصفية")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                # قائمة أنواع البالات + "الكل"
+                bale_options = ["الكل"] + get_bale_types()
+                selected_bale = st.selectbox("نوع البالة", bale_options, key="filter_bale")
+            with col2:
+                # قائمة الورديات + "الكل"
+                shift_options = ["الكل"] + list(APP_CONFIG["SHIFTS"].keys())
+                selected_shift = st.selectbox("الوردية", shift_options, key="filter_shift")
+            with col3:
+                # خيار إظهار الرسوم البيانية
+                show_charts = st.checkbox("📈 إظهار الرسوم البيانية", value=True)
+
+            if st.button("📈 عرض الإحصائيات"):
+                stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(
+                    cotton_df, sd, ed, selected_bale if selected_bale != "الكل" else None,
+                    selected_shift if selected_shift != "الكل" else None
+                )
 
                 if stats_by_type.empty:
-                    st.warning("لا توجد بيانات في هذه الفترة")
+                    st.warning("لا توجد بيانات تطابق معايير التصفية")
                 else:
                     # المؤشرات الرئيسية
-                    total_weight = stats_by_type['إجمالي الوزن'].sum()
-                    total_bales = stats_by_type['عدد البالات'].sum()
+                    total_weight = stats_by_type['إجمالي الوزن'].sum() if not stats_by_type.empty else 0
+                    total_bales = stats_by_type['عدد البالات'].sum() if not stats_by_type.empty else 0
                     avg_weight = total_weight / total_bales if total_bales > 0 else 0
 
                     col1, col2, col3 = st.columns(3)
@@ -720,26 +765,29 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
 
                     st.markdown("---")
 
-                    # الرسم البياني الخطي للوزن اليومي (باستخدام st.line_chart)
-                    if daily_data is not None and not daily_data.empty:
-                        st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
-                        # تهيئة البيانات للرسم
-                        daily_weight = daily_data.set_index('التاريخ')['إجمالي الوزن']
-                        st.line_chart(daily_weight, use_container_width=True)
+                    # عرض الرسوم البيانية إذا كان الخيار مفعلاً
+                    if show_charts:
+                        # الرسم البياني الخطي للوزن اليومي
+                        if daily_data is not None and not daily_data.empty:
+                            st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
+                            daily_weight = daily_data.set_index('التاريخ')['إجمالي الوزن']
+                            st.line_chart(daily_weight, use_container_width=True)
 
-                        st.subheader("📈 عدد البالات اليومي")
-                        daily_count = daily_data.set_index('التاريخ')['عدد البالات']
-                        st.line_chart(daily_count, use_container_width=True, color='#ff7f0e')
+                            st.subheader("📈 عدد البالات اليومي")
+                            daily_count = daily_data.set_index('التاريخ')['عدد البالات']
+                            st.line_chart(daily_count, use_container_width=True, color='#ff7f0e')
 
-                    st.markdown("---")
+                        st.markdown("---")
 
                     # إحصائيات حسب نوع البالة - جدول ورسم بياني
                     st.subheader("📊 توزيع البالات حسب النوع")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        # رسم بياني شريطي
-                        bar_data = stats_by_type.set_index('نوع البالة')['إجمالي الوزن']
-                        st.bar_chart(bar_data, use_container_width=True)
+                        if show_charts and not stats_by_type.empty:
+                            bar_data = stats_by_type.set_index('نوع البالة')['إجمالي الوزن']
+                            st.bar_chart(bar_data, use_container_width=True)
+                        else:
+                            st.info("الرسوم البيانية معطلة")
                     with col2:
                         st.dataframe(stats_by_type, use_container_width=True)
 
@@ -749,20 +797,25 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                     st.subheader("👨‍🏭 أداء المشرفين")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        bar_sup = stats_by_supervisor.set_index('المشرف')['إجمالي الوزن']
-                        st.bar_chart(bar_sup, use_container_width=True, color='#2ca02c')
+                        if show_charts and not stats_by_supervisor.empty:
+                            bar_sup = stats_by_supervisor.set_index('المشرف')['إجمالي الوزن']
+                            st.bar_chart(bar_sup, use_container_width=True, color='#2ca02c')
+                        else:
+                            st.info("الرسوم البيانية معطلة")
                     with col2:
                         st.dataframe(stats_by_supervisor, use_container_width=True)
 
                     st.markdown("---")
 
-                    # إحصائيات حسب الوردية - رسم بياني دائري (نستخدم st.pyplot مع matplotlib إذا متاح، ولكن لتجنب التبعيات نستخدم جدول)
+                    # إحصائيات حسب الوردية
                     st.subheader("🕒 توزيع الإنتاج حسب الوردية")
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        # نستخدم شريطاً معبأً بدلاً من دائري (أو نستخدم st.area_chart)
-                        shift_data = stats_by_shift.set_index('الوردية')['إجمالي الوزن']
-                        st.bar_chart(shift_data, use_container_width=True, color='#d62728')
+                        if show_charts and not stats_by_shift.empty:
+                            shift_data = stats_by_shift.set_index('الوردية')['إجمالي الوزن']
+                            st.bar_chart(shift_data, use_container_width=True, color='#d62728')
+                        else:
+                            st.info("الرسوم البيانية معطلة")
                     with col2:
                         st.dataframe(stats_by_shift, use_container_width=True)
     idx += 1
