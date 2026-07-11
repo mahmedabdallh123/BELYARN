@@ -694,7 +694,7 @@ def admin_users_management_tab():
             if username != "admin":
                 st.markdown("---")
                 if st.button(f"🗑️ حذف المستخدم {username}", key=f"delete_{username}"):
-                    confirm = st.text_input(f"تأكيد الحذف - اكتب YES", key=f"confirm_{username}")
+                    confirm = st.text_input(f"YES", key=f"confirm_{username}")
                     if confirm == "YES":
                         del users[username]
                         if save_users(users):
