@@ -230,11 +230,30 @@ def logout_action():
     st.rerun()
 
 def login_ui():
-    users = load_users()
-    state = cleanup_sessions(load_state())
+    # تأكد من وجود المفتاح logged_in
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
+    # إذا كان المستخدم مسجل الدخول بالفعل، نعرض معلومات الجلسة
+    if st.session_state.logged_in:
+        username = st.session_state.username
+        role = st.session_state.user_role
+        state = load_state()
+        rem = remaining_time(state, username)
+        if rem:
+            mins, secs = divmod(int(rem.total_seconds()), 60)
+            st.success(f"مسجل كـ {username} ({role}) - الوقت المتبقي: {mins:02d}:{secs:02d}")
+        else:
+            st.warning("انتهت الجلسة")
+            logout_action()
+        if st.button("تسجيل الخروج"):
+            logout_action()
+        return True
+
+    # إذا لم يكن مسجلاً، عرض نموذج تسجيل الدخول
+    users = load_users()
+    state = cleanup_sessions(load_state())
+    
     st.title(f"{APP_CONFIG['APP_ICON']} تسجيل الدخول - {APP_CONFIG['APP_TITLE']}")
     username_input = st.selectbox("اختر المستخدم", list(users.keys()))
     password = st.text_input("كلمة المرور", type="password")
@@ -242,42 +261,30 @@ def login_ui():
     active_count = len(active_users)
     st.caption(f"المستخدمون النشطون: {active_count}/{MAX_ACTIVE_USERS}")
 
-    if not st.session_state.logged_in:
-        if st.button("تسجيل الدخول"):
-            if username_input in users and users[username_input]["password"] == password:
-                if username_input == "admin":
-                    pass
-                elif username_input in active_users:
-                    st.warning("هذا المستخدم مسجل دخول بالفعل")
-                    return False
-                elif active_count >= MAX_ACTIVE_USERS:
-                    st.error("الحد الأقصى للمستخدمين المتصلين")
-                    return False
-                state[username_input] = {"active": True, "login_time": datetime.now().isoformat()}
-                save_state(state)
-                st.session_state.logged_in = True
-                st.session_state.username = username_input
-                st.session_state.user_role = users[username_input].get("role", "viewer")
-                st.session_state.user_permissions = users[username_input].get("permissions", {"all_sections": False})
-                st.success(f"مرحباً {username_input}")
-                st.rerun()
-            else:
-                st.error("كلمة المرور غير صحيحة")
-        return False
-    else:
-        username = st.session_state.username
-        role = st.session_state.user_role
-        st.success(f"مسجل كـ {username} ({role})")
-        rem = remaining_time(state, username)
-        if rem:
-            mins, secs = divmod(int(rem.total_seconds()), 60)
-            st.info(f"الوقت المتبقي: {mins:02d}:{secs:02d}")
+    if st.button("تسجيل الدخول"):
+        if username_input in users and users[username_input]["password"] == password:
+            if username_input == "admin":
+                pass
+            elif username_input in active_users:
+                st.warning("هذا المستخدم مسجل دخول بالفعل")
+                return False
+            elif active_count >= MAX_ACTIVE_USERS:
+                st.error("الحد الأقصى للمستخدمين المتصلين")
+                return False
+            
+            # تسجيل الدخول
+            state[username_input] = {"active": True, "login_time": datetime.now().isoformat()}
+            save_state(state)
+            st.session_state.logged_in = True
+            st.session_state.username = username_input
+            st.session_state.user_role = users[username_input].get("role", "viewer")
+            st.session_state.user_permissions = users[username_input].get("permissions", {"all_sections": False})
+            st.success(f"مرحباً {username_input}")
+            st.rerun()
         else:
-            st.warning("انتهت الجلسة")
-            logout_action()
-        if st.button("تسجيل الخروج"):
-            logout_action()
-        return True
+            st.error("كلمة المرور غير صحيحة")
+            return False
+    return False
 
 # ---------- دوال الصلاحيات ----------
 def get_user_permissions_dict(username):
@@ -471,13 +478,10 @@ def data_management_tab():
         try:
             if pd.isna(t):
                 return "00:00:00"
-            # إذا كان t نصاً بالفعل، نحاول تحويله
             if isinstance(t, str):
                 return t
-            # إذا كان كائن time
             if hasattr(t, 'strftime'):
                 return t.strftime('%H:%M:%S')
-            # إذا كان datetime
             if isinstance(t, datetime):
                 return t.strftime('%H:%M:%S')
             return "00:00:00"
@@ -510,17 +514,15 @@ def data_management_tab():
                     try:
                         if pd.isna(s) or s == "":
                             return datetime.strptime("00:00:00", "%H:%M:%S").time()
-                        # إذا كان بالفعل time object
                         if hasattr(s, 'strftime'):
                             return s
-                        # محاولة تحويل النص
                         return datetime.strptime(s, '%H:%M:%S').time()
                     except:
                         return datetime.strptime("00:00:00", "%H:%M:%S").time()
                 
                 save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
                 # تحويل الوقت إلى نص للحفظ في Excel
-                save_df['الوقت'] = save_df['الوقt'].apply(lambda x: x.strftime('%H:%M:%S'))
+                save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
                 
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.success("✅ تم حفظ التغييرات بنجاح")
@@ -739,21 +741,15 @@ def admin_users_management_tab():
 # ===============================
 st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
+# إدارة الجلسة في الشريط الجانبي
 with st.sidebar:
     st.header("الجلسة")
-    if not st.session_state.get("logged_in"):
-        if not login_ui():
-            st.stop()
-    else:
-        state = cleanup_sessions(load_state())
-        user = st.session_state.username
-        role = st.session_state.user_role
-        rem = remaining_time(state, user)
-        if rem:
-            m, s = divmod(int(rem.total_seconds()), 60)
-            st.success(f"👋 {user} | {role} | ⏳ {m:02d}:{s:02d}")
-        else:
-            logout_action()
+    # استدعاء دالة تسجيل الدخول
+    logged = login_ui()
+    # إذا لم يكن مسجلاً، نوقف التنفيذ لمنع عرض باقي الواجهة
+    if not logged:
+        st.stop()
+    
     st.markdown("---")
     if st.button("🔄 تحديث من GitHub"):
         if fetch_from_github_requests():
@@ -765,6 +761,7 @@ with st.sidebar:
     if st.button("🚪 تسجيل الخروج"):
         logout_action()
 
+# تحميل البيانات وعرض الواجهة الرئيسية
 cotton_df = load_cotton_data()
 st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
 
