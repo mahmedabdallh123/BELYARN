@@ -354,15 +354,15 @@ def save_cotton_data(df, commit_message="تحديث"):
                 try:
                     contents = repo.get_contents(APP_CONFIG["FILE_PATH"], ref=APP_CONFIG["BRANCH"])
                     repo.update_file(APP_CONFIG["FILE_PATH"], commit_message, content, contents.sha, branch=APP_CONFIG["BRANCH"])
-                    st.success("تم الحفظ والرفع إلى GitHub")
+                    st.success("✅ تم الحفظ والرفع إلى GitHub")
                 except:
                     repo.create_file(APP_CONFIG["FILE_PATH"], commit_message, content, branch=APP_CONFIG["BRANCH"])
-                    st.success("تم إنشاء الملف على GitHub")
+                    st.success("✅ تم إنشاء الملف على GitHub")
             except Exception as e:
-                st.warning(f"تم الحفظ محلياً فقط: {e}")
+                st.warning(f"⚠️ تم الحفظ محلياً فقط: {e}")
         return True
     except Exception as e:
-        st.error(f"خطأ في الحفظ: {e}")
+        st.error(f"❌ خطأ في الحفظ: {e}")
         return False
 
 # ---------- دوال النظام الأساسية ----------
@@ -388,7 +388,6 @@ def add_new_record(df, supervisor, bale_type, weight, notes=""):
     return new, pd.concat([df, pd.DataFrame([new])], ignore_index=True)
 
 def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_shift=None):
-    """حساب الإحصائيات مع إمكانية التصفية حسب نوع البالة والوردية"""
     if df.empty:
         return pd.DataFrame(), None, None, None
     df['التاريخ'] = pd.to_datetime(df['التاريخ']).dt.date
@@ -397,54 +396,33 @@ def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_
     if fdf.empty:
         return pd.DataFrame(), None, None, None
     
-    # تطبيق التصفية حسب نوع البالة
     if filter_bale_type and filter_bale_type != "الكل":
         fdf = fdf[fdf['نوع البالة'] == filter_bale_type]
     
-    # تطبيق التصفية حسب الوردية
     if filter_shift and filter_shift != "الكل":
         fdf = fdf[fdf['الوردية'] == filter_shift]
     
     if fdf.empty:
         return pd.DataFrame(), None, None, None
 
-    # 1. حسب نوع البالة (إذا لم يتم التصفية بنوع معين)
-    if filter_bale_type and filter_bale_type != "الكل":
-        # في حالة تصفية نوع معين، نعرض إحصاء واحد فقط لهذا النوع
-        stats_by_type = fdf.groupby('نوع البالة').agg({
-            'وزن البالة': ['count', 'sum', 'mean']
-        }).round(2)
-        stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-        stats_by_type = stats_by_type.reset_index()
-    else:
-        stats_by_type = fdf.groupby('نوع البالة').agg({
-            'وزن البالة': ['count', 'sum', 'mean']
-        }).round(2)
-        stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-        stats_by_type = stats_by_type.reset_index()
+    stats_by_type = fdf.groupby('نوع البالة').agg({
+        'وزن البالة': ['count', 'sum', 'mean']
+    }).round(2)
+    stats_by_type.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+    stats_by_type = stats_by_type.reset_index()
 
-    # 2. حسب المشرف
     stats_by_supervisor = fdf.groupby('المشرف').agg({
         'وزن البالة': ['count', 'sum', 'mean']
     }).round(2)
     stats_by_supervisor.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
     stats_by_supervisor = stats_by_supervisor.reset_index()
 
-    # 3. حسب الوردية (إذا لم يتم التصفية بوردة معينة)
-    if filter_shift and filter_shift != "الكل":
-        stats_by_shift = fdf.groupby('الوردية').agg({
-            'وزن البالة': ['count', 'sum', 'mean']
-        }).round(2)
-        stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-        stats_by_shift = stats_by_shift.reset_index()
-    else:
-        stats_by_shift = fdf.groupby('الوردية').agg({
-            'وزن البالة': ['count', 'sum', 'mean']
-        }).round(2)
-        stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
-        stats_by_shift = stats_by_shift.reset_index()
+    stats_by_shift = fdf.groupby('الوردية').agg({
+        'وزن البالة': ['count', 'sum', 'mean']
+    }).round(2)
+    stats_by_shift.columns = ['عدد البالات', 'إجمالي الوزن', 'متوسط الوزن']
+    stats_by_shift = stats_by_shift.reset_index()
 
-    # 4. البيانات اليومية للرسوم البيانية
     daily_data = fdf.groupby('التاريخ').agg({
         'وزن البالة': ['sum', 'count']
     }).round(2)
@@ -474,6 +452,92 @@ def get_user_permissions(role, perms):
             return {"can_input": False, "can_view_stats": True}
         else:
             return {"can_input": False, "can_view_stats": True}
+
+# ---------- تبويب إدارة البيانات (تعديل وحذف) ----------
+def data_management_tab():
+    st.header("📝 إدارة البيانات (تعديل وحذف)")
+    st.info("يمكنك تعديل الخلايا مباشرة أو حذف صفوف محددة. اضغط 'حفظ التغييرات' بعد التعديل.")
+    
+    df = load_cotton_data()
+    if df.empty:
+        st.warning("لا توجد بيانات لعرضها")
+        return
+    
+    # عرض البيانات مع محرر
+    st.subheader("📋 البيانات الحالية")
+    
+    # إضافة عمود 'تحديد للحذف' مع checkbox
+    # نضيف العمود في البيانات المعروضة
+    df_with_selection = df.copy()
+    df_with_selection['حذف'] = False
+    
+    # استخدام data_editor مع إمكانية التعديل
+    edited_df = st.data_editor(
+        df_with_selection,
+        num_rows="dynamic",
+        column_config={
+            "التاريخ": st.column_config.DateColumn("التاريخ", required=True),
+            "الوقت": st.column_config.TimeColumn("الوقت", required=True),
+            "الوردية": st.column_config.SelectboxColumn("الوردية", options=list(APP_CONFIG["SHIFTS"].keys()), required=True),
+            "المشرف": st.column_config.SelectboxColumn("المشرف", options=get_supervisors(), required=True),
+            "نوع البالة": st.column_config.SelectboxColumn("نوع البالة", options=get_bale_types(), required=True),
+            "وزن البالة": st.column_config.NumberColumn("الوزن (كجم)", min_value=0.0, step=0.1, required=True),
+            "ملاحظات": st.column_config.TextColumn("ملاحظات"),
+            "حذف": st.column_config.CheckboxColumn("حذف"),
+        },
+        hide_index=False,
+        use_container_width=True,
+        key="data_editor"
+    )
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
+            # معالجة التعديلات
+            try:
+                # إزالة عمود 'حذف' للحفظ
+                save_df = edited_df.drop(columns=['حذف'], errors='ignore')
+                if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
+                    st.success("✅ تم حفظ التغييرات بنجاح")
+                    st.rerun()
+                else:
+                    st.error("❌ فشل حفظ التغييرات")
+            except Exception as e:
+                st.error(f"❌ حدث خطأ: {e}")
+    
+    with col2:
+        if st.button("🗑️ حذف المحددات", use_container_width=True):
+            # التحقق من وجود صفوف محددة للحذف
+            rows_to_delete = edited_df[edited_df['حذف'] == True]
+            if rows_to_delete.empty:
+                st.warning("⚠️ لم يتم تحديد أي صفوف للحذف")
+            else:
+                # تأكيد الحذف
+                st.warning(f"⚠️ سيتم حذف {len(rows_to_delete)} صف(وف). هل أنت متأكد؟")
+                confirm = st.checkbox("نعم، أنا متأكد", key="confirm_delete")
+                if confirm:
+                    # حذف الصفوف
+                    keep_df = edited_df[edited_df['حذف'] == False]
+                    save_df = keep_df.drop(columns=['حذف'], errors='ignore')
+                    if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
+                        st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل حذف الصفوف")
+    
+    with col3:
+        if st.button("🔄 تحديث البيانات", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # عرض إحصائيات سريعة عن البيانات الحالية
+    st.markdown("---")
+    st.subheader("📊 ملخص سريع")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("إجمالي السجلات", len(df))
+    if not df.empty:
+        col2.metric("إجمالي الوزن", f"{df['وزن البالة'].sum():,.1f} كجم")
+        col3.metric("متوسط الوزن", f"{df['وزن البالة'].mean():.1f} كجم")
 
 # ---------- تبويب إدارة التكوين ----------
 def admin_config_management_tab():
@@ -680,6 +744,7 @@ perms = get_user_permissions(
 tabs_list = []
 if perms["can_input"]:
     tabs_list.append("📥 إدخال البيانات")
+    tabs_list.append("📝 إدارة البيانات")  # تبويب جديد لإدارة البيانات (تعديل وحذف)
 if perms["can_view_stats"]:
     tabs_list.append("📊 الإحصائيات المتقدمة")
 
@@ -710,10 +775,16 @@ if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
                 if w > 0:
                     _, new_df = add_new_record(cotton_df, sup, btype, w, note)
                     if save_cotton_data(new_df):
-                        st.success("تم الحفظ")
+                        st.success("✅ تم حفظ البيانات بنجاح")
                         st.rerun()
                 else:
-                    st.error("أدخل وزناً صحيحاً")
+                    st.error("❌ أدخل وزناً صحيحاً")
+    idx += 1
+
+# تبويب إدارة البيانات (تعديل وحذف)
+if perms["can_input"] and "📝 إدارة البيانات" in tabs_list:
+    with tabs[idx]:
+        data_management_tab()
     idx += 1
 
 # تبويب الإحصائيات المتقدمة
@@ -729,31 +800,26 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
             with col2:
                 ed = st.date_input("إلى", datetime.now().date())
 
-            # خيارات التصفية
             st.subheader("🔍 خيارات التصفية")
             col1, col2, col3 = st.columns(3)
             with col1:
-                # قائمة أنواع البالات + "الكل"
                 bale_options = ["الكل"] + get_bale_types()
                 selected_bale = st.selectbox("نوع البالة", bale_options, key="filter_bale")
             with col2:
-                # قائمة الورديات + "الكل"
                 shift_options = ["الكل"] + list(APP_CONFIG["SHIFTS"].keys())
                 selected_shift = st.selectbox("الوردية", shift_options, key="filter_shift")
             with col3:
-                # خيار إظهار الرسوم البيانية
                 show_charts = st.checkbox("📈 إظهار الرسوم البيانية", value=True)
 
-            if st.button("📈 عرض الإحصائيات"):
+            if st.button("📈 عرض الإحصائيات", type="primary"):
                 stats_by_type, stats_by_supervisor, stats_by_shift, daily_data = generate_statistics(
                     cotton_df, sd, ed, selected_bale if selected_bale != "الكل" else None,
                     selected_shift if selected_shift != "الكل" else None
                 )
 
                 if stats_by_type.empty:
-                    st.warning("لا توجد بيانات تطابق معايير التصفية")
+                    st.warning("⚠️ لا توجد بيانات تطابق معايير التصفية")
                 else:
-                    # المؤشرات الرئيسية
                     total_weight = stats_by_type['إجمالي الوزن'].sum() if not stats_by_type.empty else 0
                     total_bales = stats_by_type['عدد البالات'].sum() if not stats_by_type.empty else 0
                     avg_weight = total_weight / total_bales if total_bales > 0 else 0
@@ -765,9 +831,7 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
 
                     st.markdown("---")
 
-                    # عرض الرسوم البيانية إذا كان الخيار مفعلاً
                     if show_charts:
-                        # الرسم البياني الخطي للوزن اليومي
                         if daily_data is not None and not daily_data.empty:
                             st.subheader("📈 اتجاه الوزن الإجمالي اليومي")
                             daily_weight = daily_data.set_index('التاريخ')['إجمالي الوزن']
@@ -779,7 +843,6 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
 
                         st.markdown("---")
 
-                    # إحصائيات حسب نوع البالة - جدول ورسم بياني
                     st.subheader("📊 توزيع البالات حسب النوع")
                     col1, col2 = st.columns([2, 1])
                     with col1:
@@ -793,7 +856,6 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
 
                     st.markdown("---")
 
-                    # إحصائيات حسب المشرف
                     st.subheader("👨‍🏭 أداء المشرفين")
                     col1, col2 = st.columns([2, 1])
                     with col1:
@@ -807,7 +869,6 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
 
                     st.markdown("---")
 
-                    # إحصائيات حسب الوردية
                     st.subheader("🕒 توزيع الإنتاج حسب الوردية")
                     col1, col2 = st.columns([2, 1])
                     with col1:
