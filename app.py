@@ -34,10 +34,10 @@ except ImportError:
 APP_CONFIG = {
     "APP_TITLE": "نظام إدارة مكبس القطن",
     "APP_ICON": "🏭",
-    "REPO_NAME": "mahmedabdallh123/luva",
+    "REPO_NAME": "mahmedabdallh123/ BELYARN",
     "BRANCH": "main",
-    "FILE_PATH": "luva.xlsx",
-    "LOCAL_FILE": "luva.xlsx",
+    "FILE_PATH": " luva.xlsx",
+    "LOCAL_FILE": " luva.xlsx",
     "MAX_ACTIVE_USERS": 5,
     "SESSION_DURATION_MINUTES": 11,
     "SHIFTS": {
