@@ -7,5 +7,14 @@
             "all_sections": true
         },
         "sections_permissions": {}
+    },
+    "انس": {
+        "password": "1234",
+        "role": "data_entry",
+        "created_at": "2026-07-11T18:33:29.204620",
+        "permissions": {
+            "all_sections": false
+        },
+        "sections_permissions": {}
     }
 }
