@@ -230,11 +230,9 @@ def logout_action():
     st.rerun()
 
 def login_ui():
-    # تأكد من وجود المفتاح logged_in
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
-    # إذا كان المستخدم مسجل الدخول بالفعل، نعرض معلومات الجلسة
     if st.session_state.logged_in:
         username = st.session_state.username
         role = st.session_state.user_role
@@ -250,7 +248,6 @@ def login_ui():
             logout_action()
         return True
 
-    # إذا لم يكن مسجلاً، عرض نموذج تسجيل الدخول
     users = load_users()
     state = cleanup_sessions(load_state())
     
@@ -272,7 +269,6 @@ def login_ui():
                 st.error("الحد الأقصى للمستخدمين المتصلين")
                 return False
             
-            # تسجيل الدخول
             state[username_input] = {"active": True, "login_time": datetime.now().isoformat()}
             save_state(state)
             st.session_state.logged_in = True
@@ -394,7 +390,6 @@ def add_new_record(df, supervisor, bale_type, weight, notes=""):
     }
     return new, pd.concat([df, pd.DataFrame([new])], ignore_index=True)
 
-# تعديل دالة generate_statistics لاستخدام filter_supervisor بدلاً من filter_shift
 def generate_statistics(df, start_date, end_date, filter_bale_type=None, filter_supervisor=None):
     if df.empty:
         return pd.DataFrame(), None, None, None
@@ -461,20 +456,18 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة البيانات (تعديل وحذف) - معدلة لتجنب مشاكل الوقت ----------
+# ---------- تبويب إدارة البيانات (معدلة) ----------
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
-    st.info("يمكنك تعديل الخلايا مباشرة أو حذف صفوف محددة. اضغط 'حفظ التغييرات' بعد التعديل.")
-    
+    st.info("يمكنك تعديل الخلايا مباشرة أو حذف صفوف محددة. اضغط 'حفظ التغييرات' بعد التعديل، أو استخدم زر 'حذف المحددات'.")
+
     df = load_cotton_data()
     if df.empty:
         st.warning("لا توجد بيانات لعرضها")
         return
-    
-    # تحويل التاريخ إلى نص لتجنب مشاكل العرض
+
     df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
-    
-    # تحويل الوقت إلى نص بصيغة HH:MM:SS (للتوافق مع data_editor)
+
     def safe_time_to_str(t):
         try:
             if pd.isna(t):
@@ -488,29 +481,25 @@ def data_management_tab():
             return "00:00:00"
         except:
             return "00:00:00"
-    
+
     df['الوقت'] = df['الوقت'].apply(safe_time_to_str)
-    
-    # إضافة عمود للحذف
+
     df_display = df.copy()
     df_display['حذف'] = False
-    
-    # عرض المحرر
+
     edited_df = st.data_editor(
         df_display,
         num_rows="dynamic",
         use_container_width=True,
         key="data_editor"
     )
-    
+
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
             try:
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
-                # تحويل التاريخ إلى date
                 save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-                # تحويل الوقت من نص إلى وقت
                 def str_to_time(s):
                     try:
                         if pd.isna(s) or s == "":
@@ -520,11 +509,8 @@ def data_management_tab():
                         return datetime.strptime(s, '%H:%M:%S').time()
                     except:
                         return datetime.strptime("00:00:00", "%H:%M:%S").time()
-                
                 save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
-                # تحويل الوقت إلى نص للحفظ في Excel
                 save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
-                
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.success("✅ تم حفظ التغييرات بنجاح")
                     st.rerun()
@@ -532,7 +518,7 @@ def data_management_tab():
                     st.error("❌ فشل حفظ التغييرات")
             except Exception as e:
                 st.error(f"❌ حدث خطأ: {e}")
-    
+
     with col2:
         if st.button("🗑️ حذف المحددات", use_container_width=True):
             rows_to_delete = edited_df[edited_df['حذف'] == True]
@@ -560,12 +546,12 @@ def data_management_tab():
                         st.rerun()
                     else:
                         st.error("❌ فشل حذف الصفوف")
-    
+
     with col3:
         if st.button("🔄 تحديث البيانات", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-    
+
     st.markdown("---")
     st.subheader("📊 ملخص سريع")
     col1, col2, col3 = st.columns(3)
@@ -744,12 +730,9 @@ def admin_users_management_tab():
 # ===============================
 st.set_page_config(page_title=APP_CONFIG["APP_TITLE"], layout="wide")
 
-# إدارة الجلسة في الشريط الجانبي
 with st.sidebar:
     st.header("الجلسة")
-    # استدعاء دالة تسجيل الدخول
     logged = login_ui()
-    # إذا لم يكن مسجلاً، نوقف التنفيذ لمنع عرض باقي الواجهة
     if not logged:
         st.stop()
     
@@ -764,7 +747,6 @@ with st.sidebar:
     if st.button("🚪 تسجيل الخروج"):
         logout_action()
 
-# تحميل البيانات وعرض الواجهة الرئيسية
 cotton_df = load_cotton_data()
 st.title(f"{APP_CONFIG['APP_ICON']} {APP_CONFIG['APP_TITLE']}")
 
@@ -838,7 +820,6 @@ if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in t
                 bale_options = ["الكل"] + get_bale_types()
                 selected_bale = st.selectbox("نوع البالة", bale_options, key="filter_bale")
             with col2:
-                # استبدلنا فلتر الوردية بفلتر المشرف
                 supervisor_options = ["الكل"] + get_supervisors()
                 selected_supervisor = st.selectbox("المشرف", supervisor_options, key="filter_supervisor")
             with col3:
