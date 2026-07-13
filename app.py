@@ -488,28 +488,29 @@ def data_management_tab():
     # واجهة تحديد النطاق الزمني
     col_date1, col_date2, col_btn1, col_btn2 = st.columns([2, 2, 1, 1])
     with col_date1:
-        start_date = st.date_input("من", value=datetime.now().date() - timedelta(days=30), key="filter_start_date")
+        # استخدام القيم المخزنة في الجلسة أو القيم الافتراضية
+        default_start = st.session_state.get('filter_start_date', datetime.now().date() - timedelta(days=30))
+        start_date = st.date_input("من", value=default_start, key="filter_start_date_input")
     with col_date2:
-        end_date = st.date_input("إلى", value=datetime.now().date(), key="filter_end_date")
+        default_end = st.session_state.get('filter_end_date', datetime.now().date())
+        end_date = st.date_input("إلى", value=default_end, key="filter_end_date_input")
     with col_btn1:
         if st.button("تطبيق الفلتر", use_container_width=True):
-            st.session_state.filter_start_date = start_date
-            st.session_state.filter_end_date = end_date
+            st.session_state['filter_start_date'] = start_date
+            st.session_state['filter_end_date'] = end_date
             st.session_state.data_editor_df = None  # لإعادة تحميل البيانات المُفلترة
             st.rerun()
     with col_btn2:
         if st.button("إزالة الفلتر", use_container_width=True):
-            if "filter_start_date" in st.session_state:
-                del st.session_state.filter_start_date
-            if "filter_end_date" in st.session_state:
-                del st.session_state.filter_end_date
+            st.session_state.pop('filter_start_date', None)
+            st.session_state.pop('filter_end_date', None)
             st.session_state.data_editor_df = None
             st.rerun()
 
     # تحديد النطاق الفعلي
-    if "filter_start_date" in st.session_state and "filter_end_date" in st.session_state:
-        start_dt = st.session_state.filter_start_date
-        end_dt = st.session_state.filter_end_date
+    if 'filter_start_date' in st.session_state and 'filter_end_date' in st.session_state:
+        start_dt = st.session_state['filter_start_date']
+        end_dt = st.session_state['filter_end_date']
         # فلترة البيانات
         df_filtered = df_full[(df_full['التاريخ'] >= start_dt) & (df_full['التاريخ'] <= end_dt)]
         st.caption(f"عرض {len(df_filtered)} سجل من {len(df_full)} الكلية للفترة من {start_dt} إلى {end_dt}")
@@ -649,7 +650,6 @@ def data_management_tab():
     if not edited_df.empty:
         col2.metric("إجمالي الوزن (المعروض)", f"{edited_df['وزن البالة'].sum():,.1f} كجم")
         col3.metric("متوسط الوزن (المعروض)", f"{edited_df['وزن البالة'].mean():.1f} كجم")
-
 # ---------- تبويب إدارة التكوين ----------
 def admin_config_management_tab():
     st.header("⚙️ إدارة المشرفين وأنواع البالات")
