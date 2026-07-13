@@ -1,6 +1,5 @@
 {
     "admin": {
-        "active": true,
-        "login_time": "2026-07-13T14:48:33.073188"
+        "active": false
     }
 }
