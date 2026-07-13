@@ -377,10 +377,13 @@ def get_current_shift():
             return name
     return "الثالثه"
 
-def add_new_record(df, supervisor, bale_type, weight, notes=""):
+# تم تعديل هذه الدالة لإضافة معامل التاريخ
+def add_new_record(df, supervisor, bale_type, weight, notes="", selected_date=None):
     now = datetime.now()
+    # إذا لم يتم تمرير تاريخ، نستخدم تاريخ اليوم
+    record_date = selected_date if selected_date else now.date()
     new = {
-        'التاريخ': now.date(),
+        'التاريخ': record_date,
         'الوقت': now.time(),
         'الوردية': get_current_shift(),
         'المشرف': supervisor,
@@ -456,9 +459,7 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# =============================================================================
-# تبويب إدارة البيانات (تم إصلاح KeyError)
-# =============================================================================
+# ---------- تبويب إدارة البيانات (معدل لحل مشكلة الحذف) ----------
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
     st.info("يمكنك تعديل الخلايا مباشرة أو تحديد صفوف للحذف بواسطة العمود 'حذف'. اضغط 'حفظ التغييرات' بعد التعديل، أو 'حذف المحددات' وسيظهر تأكيد.")
@@ -500,7 +501,6 @@ def data_management_tab():
     )
     st.session_state.data_editor_df = edited_df
 
-    # التأكد من وجود عمود 'حذف'
     if 'حذف' not in edited_df.columns:
         edited_df['حذف'] = False
 
@@ -549,7 +549,6 @@ def data_management_tab():
             st.session_state.data_editor_df = None
             st.rerun()
 
-    # معالج التأكيد
     if st.session_state.get('confirm_delete', False):
         rows_to_delete = edited_df[edited_df['حذف'] == True] if 'حذف' in edited_df.columns else pd.DataFrame()
         if rows_to_delete.empty:
@@ -806,22 +805,27 @@ if not tabs_list:
 tabs = st.tabs(tabs_list)
 idx = 0
 
-# تبويب الإدخال اليدوي
+# تبويب الإدخال اليدوي (تمت إضافة اختيار التاريخ)
 if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
     with tabs[idx]:
         st.header("إدخال بيانات البالات يدوياً")
-        st.info(f"الوردية الحالية: {get_current_shift()} - {datetime.now()}")
+        st.info(f"الوردية الحالية: {get_current_shift()} - الوقت الحالي: {datetime.now().strftime('%H:%M:%S')}")
+        
         with st.form("manual"):
             col1, col2 = st.columns(2)
             with col1:
+                # حقل اختيار التاريخ
+                selected_date = st.date_input("📅 التاريخ", value=datetime.now().date())
                 sup = st.selectbox("المشرف", get_supervisors())
                 btype = st.selectbox("نوع البالة", get_bale_types())
             with col2:
                 w = st.number_input("الوزن (كجم)", min_value=0.0, step=0.1)
                 note = st.text_input("ملاحظات")
+            
             if st.form_submit_button("حفظ"):
                 if w > 0:
-                    _, new_df = add_new_record(cotton_df, sup, btype, w, note)
+                    # تمرير التاريخ المختار إلى الدالة
+                    _, new_df = add_new_record(cotton_df, sup, btype, w, note, selected_date=selected_date)
                     if save_cotton_data(new_df):
                         st.success("✅ تم حفظ البيانات بنجاح")
                         st.rerun()
