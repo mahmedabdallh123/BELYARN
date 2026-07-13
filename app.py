@@ -43,7 +43,7 @@ SESSION_DURATION = timedelta(minutes=APP_CONFIG["SESSION_DURATION_MINUTES"])
 MAX_ACTIVE_USERS = APP_CONFIG["MAX_ACTIVE_USERS"]
 GITHUB_EXCEL_URL = f"https://github.com/{APP_CONFIG['REPO_NAME'].split('/')[0]}/{APP_CONFIG['REPO_NAME'].split('/')[1]}/raw/{APP_CONFIG['BRANCH']}/{APP_CONFIG['FILE_PATH']}"
 
-# ---------- دوال إدارة التكوين (المشرفين وأنواع البالات) ----------
+# ---------- دوال إدارة التكوين ----------
 def load_config():
     default_config = {
         "supervisors": ["انسT.A", "عبدالحميدT.B", "محمود فتحيT.C", "احمد عبالعزيزT.D"],
@@ -456,16 +456,20 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة البيانات (معدلة) ----------
+# =============================================================================
+# تبويب إدارة البيانات (تم تعديلها بشكل جذري لحل مشكلة الحذف)
+# =============================================================================
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
-    st.info("يمكنك تعديل الخلايا مباشرة أو حذف صفوف محددة. اضغط 'حفظ التغييرات' بعد التعديل، أو استخدم زر 'حذف المحددات'.")
+    st.info("يمكنك تعديل الخلايا مباشرة أو تحديد صفوف للحذف بواسطة العمود 'حذف'. اضغط 'حفظ التغييرات' بعد التعديل، أو 'حذف المحددات' وسيظهر تأكيد.")
 
+    # تحميل البيانات
     df = load_cotton_data()
     if df.empty:
         st.warning("لا توجد بيانات لعرضها")
         return
 
+    # معالجة التاريخ والوقت للعرض
     df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
 
     def safe_time_to_str(t):
@@ -484,22 +488,33 @@ def data_management_tab():
 
     df['الوقت'] = df['الوقت'].apply(safe_time_to_str)
 
+    # إضافة عمود الحذف
     df_display = df.copy()
     df_display['حذف'] = False
 
+    # تخزين البيانات في الجلسة إذا لم تكن موجودة
+    if 'data_editor_df' not in st.session_state:
+        st.session_state.data_editor_df = df_display
+
+    # عرض المحرر مع تحديث الجلسة
     edited_df = st.data_editor(
-        df_display,
+        st.session_state.data_editor_df,
         num_rows="dynamic",
         use_container_width=True,
         key="data_editor"
     )
+    # تحديث الجلسة بالبيانات المعدلة (فوراً)
+    st.session_state.data_editor_df = edited_df
 
+    # أزرار التحكم
     col1, col2, col3 = st.columns([1, 1, 2])
+
     with col1:
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
             try:
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
                 save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
+
                 def str_to_time(s):
                     try:
                         if pd.isna(s) or s == "":
@@ -509,10 +524,14 @@ def data_management_tab():
                         return datetime.strptime(s, '%H:%M:%S').time()
                     except:
                         return datetime.strptime("00:00:00", "%H:%M:%S").time()
+
                 save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
                 save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
+
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.success("✅ تم حفظ التغييرات بنجاح")
+                    # إعادة تحميل البيانات وتحديث الجلسة
+                    st.session_state.data_editor_df = None
                     st.rerun()
                 else:
                     st.error("❌ فشل حفظ التغييرات")
@@ -520,36 +539,53 @@ def data_management_tab():
                 st.error(f"❌ حدث خطأ: {e}")
 
     with col2:
-        if st.button("🗑️ حذف المحددات", use_container_width=True):
-            rows_to_delete = edited_df[edited_df['حذف'] == True]
-            if rows_to_delete.empty:
-                st.warning("⚠️ لم يتم تحديد أي صفوف للحذف")
-            else:
-                st.warning(f"⚠️ سيتم حذف {len(rows_to_delete)} صف(وف). هل أنت متأكد؟")
-                if st.button("نعم، تأكيد الحذف", key="confirm_delete_btn"):
-                    keep_df = edited_df[edited_df['حذف'] == False]
-                    save_df = keep_df.drop(columns=['حذف'], errors='ignore')
-                    save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-                    def str_to_time(s):
-                        try:
-                            if pd.isna(s) or s == "":
-                                return datetime.strptime("00:00:00", "%H:%M:%S").time()
-                            if hasattr(s, 'strftime'):
-                                return s
-                            return datetime.strptime(s, '%H:%M:%S').time()
-                        except:
-                            return datetime.strptime("00:00:00", "%H:%M:%S").time()
-                    save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
-                    save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
-                    if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
-                        st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
-                        st.rerun()
-                    else:
-                        st.error("❌ فشل حذف الصفوف")
+        # نتحقق من وجود صفوف محددة للحذف
+        rows_to_delete = edited_df[edited_df['حذف'] == True]
+        if not rows_to_delete.empty:
+            if st.button(f"🗑️ حذف {len(rows_to_delete)} صف", use_container_width=True):
+                st.session_state.confirm_delete = True
+                st.rerun()
+        else:
+            st.button("🗑️ حذف المحددات", disabled=True, use_container_width=True)
 
     with col3:
         if st.button("🔄 تحديث البيانات", use_container_width=True):
             st.cache_data.clear()
+            st.session_state.data_editor_df = None
+            st.rerun()
+
+    # معالج التأكيد للحذف
+    if st.session_state.get('confirm_delete', False):
+        st.warning(f"⚠️ سيتم حذف {len(rows_to_delete)} صف(وف). هل أنت متأكد؟")
+        col_yes, col_no = st.columns(2)
+        if col_yes.button("نعم، تأكيد الحذف", key="confirm_yes"):
+            # تنفيذ الحذف
+            keep_df = edited_df[edited_df['حذف'] == False]
+            save_df = keep_df.drop(columns=['حذف'], errors='ignore')
+            save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
+
+            def str_to_time(s):
+                try:
+                    if pd.isna(s) or s == "":
+                        return datetime.strptime("00:00:00", "%H:%M:%S").time()
+                    if hasattr(s, 'strftime'):
+                        return s
+                    return datetime.strptime(s, '%H:%M:%S').time()
+                except:
+                    return datetime.strptime("00:00:00", "%H:%M:%S").time()
+
+            save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
+            save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
+
+            if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
+                st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
+                st.session_state.confirm_delete = False
+                st.session_state.data_editor_df = None
+                st.rerun()
+            else:
+                st.error("❌ فشل حذف الصفوف")
+        if col_no.button("إلغاء", key="confirm_no"):
+            st.session_state.confirm_delete = False
             st.rerun()
 
     st.markdown("---")
@@ -801,7 +837,7 @@ if perms["can_input"] and "📝 إدارة البيانات" in tabs_list:
         data_management_tab()
     idx += 1
 
-# تبويب الإحصائيات المتقدمة (معدل: استبدال فلتر الوردية بفلتر المشرف)
+# تبويب الإحصائيات المتقدمة
 if perms["can_view_stats"] and "📊 الإحصائيات المتقدمة" in tabs_list:
     with tabs[idx]:
         st.header("📊 الإحصائيات المتقدمة والرسوم البيانية")
