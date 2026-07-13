@@ -465,7 +465,6 @@ def get_user_permissions(role, perms):
 
 # =============================================================================
 # تبويب إدارة البيانات (مع إضافة خيار التصفية الزمنية)
-# =============================================================================
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
     
@@ -474,7 +473,7 @@ def data_management_tab():
         st.success(st.session_state.success_msg)
         del st.session_state.success_msg
 
-    st.info("يمكنك تحديد نطاق زمني لعرض البيانات المراد تعديلها أو حذفها، ثم قم بالتعديل في الجدول واضغط 'حفظ التغييرات'.")
+    st.info("يمكنك تحديد نطاق زمني و/أو مشرف لعرض البيانات المراد تعديلها أو حذفها، ثم قم بالتعديل في الجدول واضغط 'حفظ التغييرات'.")
 
     # تحميل البيانات كاملة
     df_full = load_cotton_data()
@@ -485,41 +484,50 @@ def data_management_tab():
     # التأكد من أن التاريخ هو تاريخ
     df_full['التاريخ'] = pd.to_datetime(df_full['التاريخ'], errors='coerce').dt.date
 
-    # واجهة تحديد النطاق الزمني
-    col_date1, col_date2, col_btn1, col_btn2 = st.columns([2, 2, 1, 1])
+    # واجهة تحديد الفلاتر (التاريخ والمشرف)
+    col_date1, col_date2, col_sup, col_btns = st.columns([2, 2, 2, 2])
     with col_date1:
-        # استخدام القيم المخزنة في الجلسة أو القيم الافتراضية
         default_start = st.session_state.get('filter_start_date', datetime.now().date() - timedelta(days=30))
         start_date = st.date_input("من", value=default_start, key="filter_start_date_input")
     with col_date2:
         default_end = st.session_state.get('filter_end_date', datetime.now().date())
         end_date = st.date_input("إلى", value=default_end, key="filter_end_date_input")
-    with col_btn1:
+    with col_sup:
+        # قائمة المشرفين مع خيار "الكل"
+        supervisors_list = ["الكل"] + get_supervisors()
+        default_sup = st.session_state.get('filter_supervisor', "الكل")
+        selected_supervisor = st.selectbox("المشرف", supervisors_list, index=supervisors_list.index(default_sup) if default_sup in supervisors_list else 0, key="filter_supervisor_select")
+    with col_btns:
+        # أزرار التطبيق والإزالة
         if st.button("تطبيق الفلتر", use_container_width=True):
             st.session_state['filter_start_date'] = start_date
             st.session_state['filter_end_date'] = end_date
+            st.session_state['filter_supervisor'] = selected_supervisor
             st.session_state.data_editor_df = None  # لإعادة تحميل البيانات المُفلترة
             st.rerun()
-    with col_btn2:
         if st.button("إزالة الفلتر", use_container_width=True):
             st.session_state.pop('filter_start_date', None)
             st.session_state.pop('filter_end_date', None)
+            st.session_state.pop('filter_supervisor', None)
             st.session_state.data_editor_df = None
             st.rerun()
 
     # تحديد النطاق الفعلي
+    df_filtered = df_full.copy()
     if 'filter_start_date' in st.session_state and 'filter_end_date' in st.session_state:
         start_dt = st.session_state['filter_start_date']
         end_dt = st.session_state['filter_end_date']
-        # فلترة البيانات
-        df_filtered = df_full[(df_full['التاريخ'] >= start_dt) & (df_full['التاريخ'] <= end_dt)]
-        st.caption(f"عرض {len(df_filtered)} سجل من {len(df_full)} الكلية للفترة من {start_dt} إلى {end_dt}")
-    else:
-        df_filtered = df_full.copy()
-        st.caption(f"عرض جميع السجلات ({len(df_filtered)})")
+        df_filtered = df_filtered[(df_filtered['التاريخ'] >= start_dt) & (df_filtered['التاريخ'] <= end_dt)]
+    if 'filter_supervisor' in st.session_state and st.session_state['filter_supervisor'] != "الكل":
+        sup = st.session_state['filter_supervisor']
+        df_filtered = df_filtered[df_filtered['المشرف'] == sup]
+
+    st.caption(f"عرض {len(df_filtered)} سجل من {len(df_full)} الكلية" + 
+               (f" (الفترة: {start_dt} إلى {end_dt})" if 'filter_start_date' in st.session_state else "") +
+               (f" - المشرف: {sup}" if 'filter_supervisor' in st.session_state and st.session_state['filter_supervisor'] != "الكل" else ""))
 
     if df_filtered.empty:
-        st.warning("لا توجد بيانات في النطاق الزمني المحدد")
+        st.warning("لا توجد بيانات تطابق معايير التصفية")
         return
 
     # تحويل الوقت إلى نص
