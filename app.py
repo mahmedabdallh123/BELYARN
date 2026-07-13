@@ -17,7 +17,7 @@ APP_CONFIG = {
     "BRANCH": "main",
     "EXCEL_FILE": "luva.xlsx",
     "MAX_USERS": 5,
-    "SESSION_MINUTES": 11,
+    "SESSION_MINUTES": 20,
     "SHIFTS": {
         "الاولي": (8, 16),
         "الثانيه": (16, 24),
