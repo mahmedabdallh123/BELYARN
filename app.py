@@ -328,6 +328,8 @@ def load_cotton_data():
         for col in required_cols:
             if col not in df.columns:
                 df[col] = ""
+        # تحويل عمود التاريخ إلى تاريخ للتسهيل
+        df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
         return df
     except Exception as e:
         st.error(f"خطأ في تحميل البيانات: {e}")
@@ -345,7 +347,11 @@ def create_new_cotton_file():
 
 def save_cotton_data(df, commit_message="تحديث"):
     try:
-        df.to_excel(APP_CONFIG["LOCAL_FILE"], index=False)
+        # تحويل التاريخ إلى نص للـ Excel
+        df_save = df.copy()
+        df_save['التاريخ'] = pd.to_datetime(df_save['التاريخ'], errors='coerce').dt.strftime('%Y-%m-%d')
+        df_save['الوقت'] = df_save['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else x)
+        df_save.to_excel(APP_CONFIG["LOCAL_FILE"], index=False)
         st.cache_data.clear()
         token = st.secrets.get("github", {}).get("token", None)
         if token and GITHUB_AVAILABLE:
@@ -457,7 +463,9 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة البيانات (معدل) ----------
+# =============================================================================
+# تبويب إدارة البيانات (مع إضافة خيار التصفية الزمنية)
+# =============================================================================
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
     
@@ -466,15 +474,54 @@ def data_management_tab():
         st.success(st.session_state.success_msg)
         del st.session_state.success_msg
 
-    st.info("يمكنك تعديل الخلايا مباشرة أو تحديد صفوف للحذف بواسطة العمود 'حذف'. اضغط 'حفظ التغييرات' بعد التعديل، أو 'حذف المحددات' وسيظهر تأكيد.")
+    st.info("يمكنك تحديد نطاق زمني لعرض البيانات المراد تعديلها أو حذفها، ثم قم بالتعديل في الجدول واضغط 'حفظ التغييرات'.")
 
-    df = load_cotton_data()
-    if df.empty:
+    # تحميل البيانات كاملة
+    df_full = load_cotton_data()
+    if df_full.empty:
         st.warning("لا توجد بيانات لعرضها")
         return
 
-    df['التاريخ'] = pd.to_datetime(df['التاريخ'], errors='coerce').dt.date
+    # التأكد من أن التاريخ هو تاريخ
+    df_full['التاريخ'] = pd.to_datetime(df_full['التاريخ'], errors='coerce').dt.date
 
+    # واجهة تحديد النطاق الزمني
+    col_date1, col_date2, col_btn1, col_btn2 = st.columns([2, 2, 1, 1])
+    with col_date1:
+        start_date = st.date_input("من", value=datetime.now().date() - timedelta(days=30), key="filter_start_date")
+    with col_date2:
+        end_date = st.date_input("إلى", value=datetime.now().date(), key="filter_end_date")
+    with col_btn1:
+        if st.button("تطبيق الفلتر", use_container_width=True):
+            st.session_state.filter_start_date = start_date
+            st.session_state.filter_end_date = end_date
+            st.session_state.data_editor_df = None  # لإعادة تحميل البيانات المُفلترة
+            st.rerun()
+    with col_btn2:
+        if st.button("إزالة الفلتر", use_container_width=True):
+            if "filter_start_date" in st.session_state:
+                del st.session_state.filter_start_date
+            if "filter_end_date" in st.session_state:
+                del st.session_state.filter_end_date
+            st.session_state.data_editor_df = None
+            st.rerun()
+
+    # تحديد النطاق الفعلي
+    if "filter_start_date" in st.session_state and "filter_end_date" in st.session_state:
+        start_dt = st.session_state.filter_start_date
+        end_dt = st.session_state.filter_end_date
+        # فلترة البيانات
+        df_filtered = df_full[(df_full['التاريخ'] >= start_dt) & (df_full['التاريخ'] <= end_dt)]
+        st.caption(f"عرض {len(df_filtered)} سجل من {len(df_full)} الكلية للفترة من {start_dt} إلى {end_dt}")
+    else:
+        df_filtered = df_full.copy()
+        st.caption(f"عرض جميع السجلات ({len(df_filtered)})")
+
+    if df_filtered.empty:
+        st.warning("لا توجد بيانات في النطاق الزمني المحدد")
+        return
+
+    # تحويل الوقت إلى نص
     def safe_time_to_str(t):
         try:
             if pd.isna(t):
@@ -489,14 +536,17 @@ def data_management_tab():
         except:
             return "00:00:00"
 
-    df['الوقت'] = df['الوقت'].apply(safe_time_to_str)
+    df_filtered['الوقت'] = df_filtered['الوقت'].apply(safe_time_to_str)
 
-    df_display = df.copy()
+    # إضافة عمود الحذف
+    df_display = df_filtered.copy()
     df_display['حذف'] = False
 
-    if 'data_editor_df' not in st.session_state:
+    # استعادة البيانات المعدلة من الجلسة إن وجدت
+    if 'data_editor_df' not in st.session_state or st.session_state.data_editor_df is None:
         st.session_state.data_editor_df = df_display
 
+    # عرض المحرر
     edited_df = st.data_editor(
         st.session_state.data_editor_df,
         num_rows="dynamic",
@@ -508,17 +558,19 @@ def data_management_tab():
     if 'حذف' not in edited_df.columns:
         edited_df['حذف'] = False
 
+    # أزرار التحكم
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        # نضيف حالة تعطيل الزر إذا كانت عملية الحفظ قيد التنفيذ
         is_saving = st.session_state.get("saving", False)
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True, disabled=is_saving):
             st.session_state.saving = True
             try:
+                # إزالة عمود الحذف
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
+                # التأكد من أن التاريخ هو تاريخ
                 save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-
+                # تحويل الوقت من نص إلى وقت
                 def str_to_time(s):
                     try:
                         if pd.isna(s) or s == "":
@@ -528,10 +580,8 @@ def data_management_tab():
                         return datetime.strptime(s, '%H:%M:%S').time()
                     except:
                         return datetime.strptime("00:00:00", "%H:%M:%S").time()
-
                 save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
-                save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
-
+                # حفظ البيانات
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
                     st.session_state.success_msg = "✅ تم حفظ التغييرات بنجاح"
                     st.session_state.data_editor_df = None
@@ -559,6 +609,7 @@ def data_management_tab():
             st.session_state.data_editor_df = None
             st.rerun()
 
+    # معالج التأكيد للحذف
     if st.session_state.get('confirm_delete', False):
         rows_to_delete = edited_df[edited_df['حذف'] == True] if 'حذف' in edited_df.columns else pd.DataFrame()
         if rows_to_delete.empty:
@@ -570,7 +621,6 @@ def data_management_tab():
             keep_df = edited_df[edited_df['حذف'] == False] if 'حذف' in edited_df.columns else edited_df
             save_df = keep_df.drop(columns=['حذف'], errors='ignore')
             save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-
             def str_to_time(s):
                 try:
                     if pd.isna(s) or s == "":
@@ -580,10 +630,7 @@ def data_management_tab():
                     return datetime.strptime(s, '%H:%M:%S').time()
                 except:
                     return datetime.strptime("00:00:00", "%H:%M:%S").time()
-
             save_df['الوقت'] = save_df['الوقت'].apply(str_to_time)
-            save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
-
             if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
                 st.session_state.success_msg = f"✅ تم حذف {len(rows_to_delete)} صف بنجاح"
                 st.session_state.confirm_delete = False
@@ -598,10 +645,10 @@ def data_management_tab():
     st.markdown("---")
     st.subheader("📊 ملخص سريع")
     col1, col2, col3 = st.columns(3)
-    col1.metric("إجمالي السجلات", len(df))
-    if not df.empty:
-        col2.metric("إجمالي الوزن", f"{df['وزن البالة'].sum():,.1f} كجم")
-        col3.metric("متوسط الوزن", f"{df['وزن البالة'].mean():.1f} كجم")
+    col1.metric("إجمالي السجلات المعروضة", len(edited_df))
+    if not edited_df.empty:
+        col2.metric("إجمالي الوزن (المعروض)", f"{edited_df['وزن البالة'].sum():,.1f} كجم")
+        col3.metric("متوسط الوزن (المعروض)", f"{edited_df['وزن البالة'].mean():.1f} كجم")
 
 # ---------- تبويب إدارة التكوين ----------
 def admin_config_management_tab():
@@ -818,7 +865,6 @@ idx = 0
 # تبويب الإدخال اليدوي
 if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
     with tabs[idx]:
-        # عرض رسالة نجاح إذا وجدت
         if st.session_state.get("success_msg"):
             st.success(st.session_state.success_msg)
             del st.session_state.success_msg
