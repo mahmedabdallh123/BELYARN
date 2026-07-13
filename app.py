@@ -170,7 +170,6 @@ def login_ui():
         else:
             st.warning("انتهت الجلسة")
             logout()
-        # تم حذف زر تسجيل الخروج من هنا
         return True
 
     users = load_users()
@@ -282,10 +281,21 @@ def get_current_shift():
             return name
     return "الثالثه"
 
+# تم تعديل هذه الدالة للتحقق من التكرار
 def add_record(df, supervisor, bale_type, weight, note="", selected_date=None):
     now = datetime.now()
+    record_date = selected_date or now.date()
+    # التحقق من وجود سجل مكرر بنفس التاريخ والمشرف والنوع والوزن
+    duplicate = df[
+        (df['التاريخ'] == record_date) &
+        (df['المشرف'] == supervisor) &
+        (df['نوع البالة'] == bale_type) &
+        (df['وزن البالة'] == weight)
+    ]
+    if not duplicate.empty:
+        return None  # يعني مكرر
     record = {
-        'التاريخ': selected_date or now.date(),
+        'التاريخ': record_date,
         'الوقت': now.time(),
         'الوردية': get_current_shift(),
         'المشرف': supervisor,
@@ -332,7 +342,7 @@ def generate_stats(df, start, end, filter_bale=None, filter_supervisor=None):
     return by_type, by_sup, by_shift, daily
 
 # --------------------------------
-# 7. تبويب إدخال البيانات
+# 7. تبويب إدخال البيانات (مع رسائل ومنع التكرار)
 # --------------------------------
 def input_tab(df):
     st.header("📥 إدخال بيانات البالات")
@@ -350,11 +360,14 @@ def input_tab(df):
         if submitted:
             if weight > 0:
                 new_df = add_record(df, sup, btype, weight, note, date)
-                if save_cotton_data(new_df, "إدخال جديد"):
-                    st.session_state.success_msg = "✅ تم حفظ البيانات بنجاح"
-                    st.rerun()
+                if new_df is not None:
+                    if save_cotton_data(new_df, "إدخال جديد"):
+                        st.session_state.success_msg = "✅ تم حفظ البيانات بنجاح"
+                        st.rerun()
+                    else:
+                        st.error("❌ فشل حفظ البيانات")
                 else:
-                    st.error("❌ فشل حفظ البيانات")
+                    st.warning("⚠️ سجل مكرر! نفس التاريخ، المشرف، النوع والوزن موجود بالفعل.")
             else:
                 st.error("❌ أدخل وزناً صحيحاً")
 
