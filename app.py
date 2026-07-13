@@ -377,10 +377,8 @@ def get_current_shift():
             return name
     return "الثالثه"
 
-# تم تعديل هذه الدالة لإضافة معامل التاريخ
 def add_new_record(df, supervisor, bale_type, weight, notes="", selected_date=None):
     now = datetime.now()
-    # إذا لم يتم تمرير تاريخ، نستخدم تاريخ اليوم
     record_date = selected_date if selected_date else now.date()
     new = {
         'التاريخ': record_date,
@@ -459,9 +457,15 @@ def get_user_permissions(role, perms):
         else:
             return {"can_input": False, "can_view_stats": True}
 
-# ---------- تبويب إدارة البيانات (معدل لحل مشكلة الحذف) ----------
+# ---------- تبويب إدارة البيانات (معدل) ----------
 def data_management_tab():
     st.header("📝 إدارة البيانات (تعديل وحذف)")
+    
+    # عرض رسالة نجاح إذا وجدت
+    if st.session_state.get("success_msg"):
+        st.success(st.session_state.success_msg)
+        del st.session_state.success_msg
+
     st.info("يمكنك تعديل الخلايا مباشرة أو تحديد صفوف للحذف بواسطة العمود 'حذف'. اضغط 'حفظ التغييرات' بعد التعديل، أو 'حذف المحددات' وسيظهر تأكيد.")
 
     df = load_cotton_data()
@@ -507,7 +511,10 @@ def data_management_tab():
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True):
+        # نضيف حالة تعطيل الزر إذا كانت عملية الحفظ قيد التنفيذ
+        is_saving = st.session_state.get("saving", False)
+        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True, disabled=is_saving):
+            st.session_state.saving = True
             try:
                 save_df = edited_df.drop(columns=['حذف'], errors='ignore')
                 save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
@@ -526,12 +533,15 @@ def data_management_tab():
                 save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
 
                 if save_cotton_data(save_df, "تعديل البيانات يدوياً"):
-                    st.success("✅ تم حفظ التغييرات بنجاح")
+                    st.session_state.success_msg = "✅ تم حفظ التغييرات بنجاح"
                     st.session_state.data_editor_df = None
+                    st.session_state.saving = False
                     st.rerun()
                 else:
+                    st.session_state.saving = False
                     st.error("❌ فشل حفظ التغييرات")
             except Exception as e:
+                st.session_state.saving = False
                 st.error(f"❌ حدث خطأ: {e}")
 
     with col2:
@@ -575,7 +585,7 @@ def data_management_tab():
             save_df['الوقت'] = save_df['الوقت'].apply(lambda x: x.strftime('%H:%M:%S'))
 
             if save_cotton_data(save_df, f"حذف {len(rows_to_delete)} صف"):
-                st.success(f"✅ تم حذف {len(rows_to_delete)} صف بنجاح")
+                st.session_state.success_msg = f"✅ تم حذف {len(rows_to_delete)} صف بنجاح"
                 st.session_state.confirm_delete = False
                 st.session_state.data_editor_df = None
                 st.rerun()
@@ -674,7 +684,7 @@ def admin_config_management_tab():
     else:
         st.warning("لا توجد أنواع بالات، الرجاء إضافة نوع")
 
-# ---------- تبويب إدارة المستخدمين (معدل: تأكيد الحذف بكلمة "تم") ----------
+# ---------- تبويب إدارة المستخدمين ----------
 def admin_users_management_tab():
     st.header("👥 إدارة المستخدمين والصلاحيات")
     st.info("هنا يمكنك إضافة، تعديل، أو حذف المستخدمين وتحديد صلاحياتهم.")
@@ -805,16 +815,20 @@ if not tabs_list:
 tabs = st.tabs(tabs_list)
 idx = 0
 
-# تبويب الإدخال اليدوي (تمت إضافة اختيار التاريخ)
+# تبويب الإدخال اليدوي
 if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
     with tabs[idx]:
+        # عرض رسالة نجاح إذا وجدت
+        if st.session_state.get("success_msg"):
+            st.success(st.session_state.success_msg)
+            del st.session_state.success_msg
+        
         st.header("إدخال بيانات البالات يدوياً")
         st.info(f"الوردية الحالية: {get_current_shift()} - الوقت الحالي: {datetime.now().strftime('%H:%M:%S')}")
         
         with st.form("manual"):
             col1, col2 = st.columns(2)
             with col1:
-                # حقل اختيار التاريخ
                 selected_date = st.date_input("📅 التاريخ", value=datetime.now().date())
                 sup = st.selectbox("المشرف", get_supervisors())
                 btype = st.selectbox("نوع البالة", get_bale_types())
@@ -822,13 +836,15 @@ if perms["can_input"] and "📥 إدخال البيانات" in tabs_list:
                 w = st.number_input("الوزن (كجم)", min_value=0.0, step=0.1)
                 note = st.text_input("ملاحظات")
             
-            if st.form_submit_button("حفظ"):
+            submitted = st.form_submit_button("حفظ", type="primary")
+            if submitted:
                 if w > 0:
-                    # تمرير التاريخ المختار إلى الدالة
                     _, new_df = add_new_record(cotton_df, sup, btype, w, note, selected_date=selected_date)
                     if save_cotton_data(new_df):
-                        st.success("✅ تم حفظ البيانات بنجاح")
+                        st.session_state.success_msg = "✅ تم حفظ البيانات بنجاح"
                         st.rerun()
+                    else:
+                        st.error("❌ فشل حفظ البيانات")
                 else:
                     st.error("❌ أدخل وزناً صحيحاً")
     idx += 1
