@@ -409,10 +409,10 @@ def management_tab(df_full):
         st.warning("لا توجد بيانات تطابق المعايير")
         return
 
-    # تحضير البيانات للعرض
+    # تحضير البيانات للعرض (تم تصحيح اسم العمود)
     df_display = df_filtered.copy()
     df_display['التاريخ'] = pd.to_datetime(df_display['التاريخ']).dt.date
-    df_display['الوقت'] = df_display['الوقт'].apply(
+    df_display['الوقت'] = df_display['الوقت'].apply(
         lambda t: t.strftime('%H:%M:%S') if hasattr(t, 'strftime') else str(t)
     )
     df_display['حذف'] = False
