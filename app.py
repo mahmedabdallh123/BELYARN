@@ -170,8 +170,7 @@ def login_ui():
         else:
             st.warning("انتهت الجلسة")
             logout()
-        if st.button("تسجيل الخروج"):
-            logout()
+        # تم حذف زر تسجيل الخروج من هنا
         return True
 
     users = load_users()
@@ -409,7 +408,7 @@ def management_tab(df_full):
         st.warning("لا توجد بيانات تطابق المعايير")
         return
 
-    # تحضير البيانات للعرض (تم تصحيح اسم العمود)
+    # تحضير البيانات للعرض
     df_display = df_filtered.copy()
     df_display['التاريخ'] = pd.to_datetime(df_display['التاريخ']).dt.date
     df_display['الوقت'] = df_display['الوقت'].apply(
