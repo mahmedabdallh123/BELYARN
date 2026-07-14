@@ -16,5 +16,14 @@
             "all_sections": false
         },
         "sections_permissions": {}
+    },
+    "ZEZO": {
+        "password": "123456789",
+        "role": "data_entry",
+        "created_at": "2026-07-14T06:05:18.221429",
+        "permissions": {
+            "all_sections": false
+        },
+        "sections_permissions": {}
     }
 }
