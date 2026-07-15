@@ -3,6 +3,7 @@
         "active": false
     },
     "ZEZO": {
-        "active": false
+        "active": true,
+        "login_time": "2026-07-15T20:26:39.286124"
     }
 }
