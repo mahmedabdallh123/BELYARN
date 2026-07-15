@@ -1,7 +1,6 @@
 {
     "admin": {
-        "active": true,
-        "login_time": "2026-07-15T09:34:07.790482"
+        "active": false
     },
     "ZEZO": {
         "active": false
