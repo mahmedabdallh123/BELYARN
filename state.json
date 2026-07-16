@@ -1,13 +1,11 @@
 {
     "admin": {
-        "active": true,
-        "login_time": "2026-07-16T11:50:55.243161"
+        "active": false
     },
     "ZEZO": {
         "active": false
     },
     "فتحي": {
-        "active": true,
-        "login_time": "2026-07-16T11:55:38.296127"
+        "active": false
     }
 }
