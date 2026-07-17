@@ -380,20 +380,18 @@ def management_tab(df_full):
         st.success(st.session_state.success_msg)
         del st.session_state.success_msg
 
-    st.info("حدد نطاقاً زمنياً و/أو مشرفاً، ثم عدّل في الجدول واحفظ.")
+    st.info("حدد نطاقاً زمنياً و/أو مشرفاً، ثم عدّل في الجدول واحفظ. جميع التغييرات تنطبق على قاعدة البيانات الكاملة، وليس فقط المعروضة.")
 
-    # فلترة
+    # --- فلترة العرض فقط ---
     col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
     with col1:
-        start = st.date_input("من", st.session_state.get('filter_start', datetime.now().date() - timedelta(days=30)),
-                              key="start_inp")
+        start = st.date_input("من", st.session_state.get('filter_start', datetime.now().date() - timedelta(days=30)), key="start_inp")
     with col2:
         end = st.date_input("إلى", st.session_state.get('filter_end', datetime.now().date()), key="end_inp")
     with col3:
         sup_list = ["الكل"] + get_supervisors()
         default_sup = st.session_state.get('filter_sup', "الكل")
-        sup = st.selectbox("المشرف", sup_list, index=sup_list.index(default_sup) if default_sup in sup_list else 0,
-                           key="sup_inp")
+        sup = st.selectbox("المشرف", sup_list, index=sup_list.index(default_sup) if default_sup in sup_list else 0, key="sup_inp")
     with col4:
         if st.button("تطبيق الفلتر", use_container_width=True):
             st.session_state['filter_start'] = start
@@ -407,26 +405,24 @@ def management_tab(df_full):
             st.session_state.data_editor_df = None
             st.rerun()
 
-    # تطبيق الفلاتر
-    df_filtered = df_full.copy()
+    # تطبيق الفلاتر للعرض فقط
+    df_display_full = df_full.copy()
     if 'filter_start' in st.session_state and 'filter_end' in st.session_state:
-        df_filtered = df_filtered[(df_filtered['التاريخ'] >= st.session_state['filter_start']) &
-                                  (df_filtered['التاريخ'] <= st.session_state['filter_end'])]
+        df_display_full = df_display_full[(df_display_full['التاريخ'] >= st.session_state['filter_start']) &
+                                          (df_display_full['التاريخ'] <= st.session_state['filter_end'])]
     if 'filter_sup' in st.session_state and st.session_state['filter_sup'] != "الكل":
-        df_filtered = df_filtered[df_filtered['المشرف'] == st.session_state['filter_sup']]
+        df_display_full = df_display_full[df_display_full['المشرف'] == st.session_state['filter_sup']]
 
-    st.caption(f"عرض {len(df_filtered)} سجل من {len(df_full)}")
+    st.caption(f"عرض {len(df_display_full)} سجل من {len(df_full)} (التعديلات تؤثر على جميع السجلات)")
 
-    if df_filtered.empty:
+    if df_display_full.empty:
         st.warning("لا توجد بيانات تطابق المعايير")
         return
 
     # تحضير البيانات للعرض
-    df_display = df_filtered.copy()
+    df_display = df_display_full.copy()
     df_display['التاريخ'] = pd.to_datetime(df_display['التاريخ']).dt.date
-    df_display['الوقت'] = df_display['الوقت'].apply(
-        lambda t: t.strftime('%H:%M:%S') if hasattr(t, 'strftime') else str(t)
-    )
+    df_display['الوقت'] = df_display['الوقت'].apply(lambda t: t.strftime('%H:%M:%S') if hasattr(t, 'strftime') else str(t))
     df_display['حذف'] = False
 
     if 'data_editor_df' not in st.session_state or st.session_state.data_editor_df is None:
@@ -440,18 +436,55 @@ def management_tab(df_full):
 
     # أزرار التحكم
     c1, c2, c3 = st.columns([1, 1, 2])
+
+    # --- زر حفظ التغييرات (تعديلات) ---
     with c1:
-        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True,
-                     disabled=st.session_state.get('saving', False)):
+        if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True, disabled=st.session_state.get('saving', False)):
             st.session_state.saving = True
             try:
-                save_df = edited.drop(columns=['حذف'], errors='ignore')
-                save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-                save_df['الوقت'] = save_df['الوقت'].apply(
+                # 1. استخراج الصفوف التي تم تعديلها (من المُفلتر) مع بياناتها الكاملة (بدون عمود الحذف)
+                edited_clean = edited.drop(columns=['حذف'], errors='ignore')
+                # تحويل الوقت إلى كائن time
+                edited_clean['الوقت'] = edited_clean['الوقت'].apply(
                     lambda x: datetime.strptime(str(x), '%H:%M:%S').time() if isinstance(x, str) else x
                 )
-                if save_cotton_data(save_df, "تعديل البيانات"):
-                    st.session_state.success_msg = "✅ تم حفظ التغييرات"
+                # تحويل التاريخ إلى date
+                edited_clean['التاريخ'] = pd.to_datetime(edited_clean['التاريخ'], errors='coerce').dt.date
+
+                # 2. تحديث البيانات الكاملة: نأخذ البيانات الكاملة الأصلية، ونستبدل الصفوف التي لها نفس المفتاح (التاريخ، الوقت، المشرف، نوع البالة، الوزن)
+                #    ولكن بما أنه لا يوجد مفتاح فريد، نستخدم فكرة: نأخذ جميع الصفوف من df_full، ونستبدل الصفوف الموجودة في edited_clean
+                #    عن طريق تطابق (التاريخ، الوقت، المشرف، نوع البالة، الوزن) - هذا تقريبي، لكن الأفضل هو إضافة عمود معرف فريد.
+                #    لحل هذه المشكلة بشكل آمن، سنقوم بدمج البيانات كالتالي:
+                #    نأخذ جميع الصفوف من df_full، ونزيل أي صف موجود في edited_clean (بناءً على تطابق جميع الأعمدة)، ثم نضيف edited_clean.
+                #    ولكن هذا قد لا يكون دقيقاً إذا كانت هناك نسخ مكررة، لذا سنستخدم طريقة أكثر أماناً:
+                #    نقوم بحذف جميع الصفوف التي تتطابق مع الصفوف في edited_clean (باستخدام merge مع مؤشر)، ثم نضيف الصفوف المعدلة.
+
+                # تحويل df_full إلى نسخة قابلة للتعديل
+                df_full_work = df_full.copy()
+                # تحويل الوقت إلى نص للمقارنة (نفس تنسيق edited_clean بعد تحويل الوقت)
+                df_full_work['الوقت_str'] = df_full_work['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
+                edited_clean['الوقت_str'] = edited_clean['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
+
+                # تحديد الأعمدة المستخدمة للمقارنة (بدون الملاحظات لأنها قد تتغير)
+                compare_cols = ['التاريخ', 'الوقت_str', 'المشرف', 'نوع البالة', 'وزن البالة']
+                # دمج لتحديد الصفوف التي سيتم تحديثها
+                merged = pd.merge(df_full_work[compare_cols], edited_clean[compare_cols], on=compare_cols, how='inner', indicator=True)
+                # الصفوف التي يجب إزالتها من df_full_work (تلك الموجودة في edited_clean)
+                rows_to_remove = merged[merged['_merge'] == 'both'][compare_cols]
+                if not rows_to_remove.empty:
+                    # إزالة الصفوف القديمة
+                    df_full_work = pd.merge(df_full_work, rows_to_remove, on=compare_cols, how='left', indicator=True)
+                    df_full_work = df_full_work[df_full_work['_merge'] == 'left_only'].drop(columns=['_merge', 'الوقت_str'])
+                else:
+                    df_full_work = df_full_work.drop(columns=['الوقت_str'], errors='ignore')
+
+                # إضافة الصفوف المعدلة (مع إزالة عمود الوقت_str)
+                edited_clean_final = edited_clean.drop(columns=['الوقت_str'], errors='ignore')
+                df_final = pd.concat([df_full_work, edited_clean_final], ignore_index=True)
+
+                # حفظ البيانات الكاملة
+                if save_cotton_data(df_final, "تعديل البيانات"):
+                    st.session_state.success_msg = "✅ تم حفظ التغييرات بنجاح"
                     st.session_state.data_editor_df = None
                     st.session_state.saving = False
                     st.rerun()
@@ -462,6 +495,7 @@ def management_tab(df_full):
                 st.session_state.saving = False
                 st.error(f"❌ خطأ: {e}")
 
+    # --- زر حذف المحددات ---
     with c2:
         to_delete = edited[edited['حذف'] == True] if 'حذف' in edited.columns else pd.DataFrame()
         if not to_delete.empty:
@@ -477,23 +511,39 @@ def management_tab(df_full):
             st.session_state.data_editor_df = None
             st.rerun()
 
-    # تأكيد الحذف
+    # --- تأكيد الحذف ---
     if st.session_state.get('confirm_delete', False):
         to_delete = edited[edited['حذف'] == True] if 'حذف' in edited.columns else pd.DataFrame()
         if to_delete.empty:
             st.session_state.confirm_delete = False
             st.rerun()
-        st.warning(f"⚠️ سيتم حذف {len(to_delete)} صف. هل أنت متأكد؟")
+        st.warning(f"⚠️ سيتم حذف {len(to_delete)} صف من قاعدة البيانات بالكامل. هل أنت متأكد؟")
         col_yes, col_no = st.columns(2)
         if col_yes.button("نعم", key="del_yes"):
-            keep = edited[edited['حذف'] == False] if 'حذف' in edited.columns else edited
-            save_df = keep.drop(columns=['حذف'], errors='ignore')
-            save_df['التاريخ'] = pd.to_datetime(save_df['التاريخ'], errors='coerce').dt.date
-            save_df['الوقت'] = save_df['الوقت'].apply(
+            # حذف من البيانات الكاملة وليس فقط المُفلتر
+            # نستخدم نفس منطق المقارنة لإزالة الصفوف من df_full
+            df_full_work = df_full.copy()
+            # تحويل الوقت إلى نص للمقارنة
+            df_full_work['الوقت_str'] = df_full_work['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
+            to_delete_clean = to_delete.drop(columns=['حذف'], errors='ignore')
+            to_delete_clean['الوقت'] = to_delete_clean['الوقت'].apply(
                 lambda x: datetime.strptime(str(x), '%H:%M:%S').time() if isinstance(x, str) else x
             )
-            if save_cotton_data(save_df, f"حذف {len(to_delete)} صف"):
-                st.session_state.success_msg = f"✅ تم حذف {len(to_delete)} صف"
+            to_delete_clean['التاريخ'] = pd.to_datetime(to_delete_clean['التاريخ'], errors='coerce').dt.date
+            to_delete_clean['الوقت_str'] = to_delete_clean['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
+
+            compare_cols = ['التاريخ', 'الوقت_str', 'المشرف', 'نوع البالة', 'وزن البالة']
+            # دمج لإيجاد الصفوف المطلوب حذفها
+            merged = pd.merge(df_full_work[compare_cols], to_delete_clean[compare_cols], on=compare_cols, how='inner', indicator=True)
+            rows_to_delete = merged[merged['_merge'] == 'both'][compare_cols]
+            if not rows_to_delete.empty:
+                df_full_work = pd.merge(df_full_work, rows_to_delete, on=compare_cols, how='left', indicator=True)
+                df_final = df_full_work[df_full_work['_merge'] == 'left_only'].drop(columns=['_merge', 'الوقت_str'], errors='ignore')
+            else:
+                df_final = df_full_work.drop(columns=['الوقت_str'], errors='ignore')
+
+            if save_cotton_data(df_final, f"حذف {len(to_delete)} صف"):
+                st.session_state.success_msg = f"✅ تم حذف {len(to_delete)} صف بنجاح"
                 st.session_state.confirm_delete = False
                 st.session_state.data_editor_df = None
                 st.rerun()
@@ -509,9 +559,8 @@ def management_tab(df_full):
     c1, c2, c3 = st.columns(3)
     c1.metric("السجلات المعروضة", len(edited))
     if not edited.empty:
-        c2.metric("إجمالي الوزن", f"{edited['وزن البالة'].sum():,.1f} كجم")
-        c3.metric("المتوسط", f"{edited['وزن البالة'].mean():.1f} كجم")
-
+        c2.metric("إجمالي الوزن (المعروض)", f"{edited['وزن البالة'].sum():,.1f} كجم")
+        c3.metric("المتوسط (المعروض)", f"{edited['وزن البالة'].mean():.1f} كجم")
 # --------------------------------
 # 9. تبويب الإحصائيات المتقدمة
 # --------------------------------
