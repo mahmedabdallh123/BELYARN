@@ -8,6 +8,56 @@ from datetime import datetime, timedelta
 from github import Github
 
 # --------------------------------
+# 0. دوال البريد الإلكتروني (جديدة)
+# --------------------------------
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def get_email_config():
+    """استخراج إعدادات البريد من secrets."""
+    try:
+        host = st.secrets["email"]["host"]
+        port = int(st.secrets["email"]["port"])
+        username = st.secrets["email"]["username"]
+        password = st.secrets["email"]["password"]
+        recipient = st.secrets["email"]["recipient"]
+        return {
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+            "recipient": recipient
+        }
+    except Exception:
+        return None
+
+def send_email_report(subject: str, body: str) -> bool:
+    """إرسال بريد إلكتروني يحتوي على تقرير الإحصائيات."""
+    config = get_email_config()
+    if not config:
+        st.warning("⚠️ إعدادات البريد الإلكتروني غير مكتملة. لن يتم إرسال الإشعارات.")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = config["username"]
+        msg["To"] = config["recipient"]
+        msg["Subject"] = subject
+
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        server = smtplib.SMTP(config["host"], config["port"])
+        server.starttls()
+        server.login(config["username"], config["password"])
+        server.sendmail(config["username"], config["recipient"], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"❌ فشل إرسال البريد الإلكتروني: {e}")
+        return False
+
+# --------------------------------
 # 1. الإعدادات والتكوين
 # --------------------------------
 APP_CONFIG = {
@@ -281,11 +331,9 @@ def get_current_shift():
             return name
     return "الثالثه"
 
-# تم تعديل هذه الدالة للتحقق من التكرار
 def add_record(df, supervisor, bale_type, weight, note="", selected_date=None):
     now = datetime.now()
     record_date = selected_date or now.date()
-    # التحقق من وجود سجل مكرر بنفس التاريخ والمشرف والنوع والوزن
     duplicate = df[
         (df['التاريخ'] == record_date) &
         (df['المشرف'] == supervisor) &
@@ -293,7 +341,7 @@ def add_record(df, supervisor, bale_type, weight, note="", selected_date=None):
         (df['وزن البالة'] == weight)
     ]
     if not duplicate.empty:
-        return None  # يعني مكرر
+        return None
     record = {
         'التاريخ': record_date,
         'الوقت': now.time(),
@@ -342,7 +390,77 @@ def generate_stats(df, start, end, filter_bale=None, filter_supervisor=None):
     return by_type, by_sup, by_shift, daily
 
 # --------------------------------
-# 7. تبويب إدخال البيانات (مع رسائل ومنع التكرار)
+# 7. دالة الحصول على إحصائيات اليوم (للبريد الإلكتروني)
+# --------------------------------
+def get_today_stats(df):
+    if df.empty:
+        return None
+    today = datetime.now().date()
+    df_today = df[df['التاريخ'] == today]
+    if df_today.empty:
+        return {
+            'date': today,
+            'total_weight': 0,
+            'total_bales': 0,
+            'avg_weight': 0,
+            'supervisors': [],
+            'types': [],
+            'shifts': []
+        }
+    total_weight = df_today['وزن البالة'].sum()
+    total_bales = len(df_today)
+    avg_weight = total_weight / total_bales if total_bales > 0 else 0
+
+    # تفاصيل إضافية
+    sup_summary = df_today.groupby('المشرف')['وزن البالة'].sum().to_dict()
+    type_summary = df_today.groupby('نوع البالة')['وزن البالة'].sum().to_dict()
+    shift_summary = df_today.groupby('الوردية')['وزن البالة'].sum().to_dict()
+
+    return {
+        'date': today,
+        'total_weight': round(total_weight, 2),
+        'total_bales': total_bales,
+        'avg_weight': round(avg_weight, 2),
+        'supervisors': sup_summary,
+        'types': type_summary,
+        'shifts': shift_summary
+    }
+
+def send_auto_email(df):
+    """حساب إحصائيات اليوم وإرسالها عبر البريد الإلكتروني."""
+    stats = get_today_stats(df)
+    if stats is None:
+        return
+
+    # تنسيق نص البريد
+    body = f"""📊 تقرير إنتاج اليوم - {stats['date'].strftime('%Y-%m-%d')}
+================================
+
+📈 إجمالي الوزن: {stats['total_weight']} كجم
+📦 عدد البالات: {stats['total_bales']}
+⚖️ متوسط الوزن: {stats['avg_weight']} كجم
+
+--- تفاصيل حسب المشرفين ---
+"""
+    for sup, w in stats['supervisors'].items():
+        body += f"  {sup}: {w} كجم\n"
+
+    body += "\n--- تفاصيل حسب نوع البالة ---\n"
+    for t, w in stats['types'].items():
+        body += f"  {t}: {w} كجم\n"
+
+    body += "\n--- تفاصيل حسب الوردية ---\n"
+    for s, w in stats['shifts'].items():
+        body += f"  {s}: {w} كجم\n"
+
+    body += f"\n🕒 وقت الإرسال: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    subject = f"تقرير إنتاج مكبس القطن - {stats['date'].strftime('%Y-%m-%d')}"
+
+    send_email_report(subject, body)
+
+# --------------------------------
+# 8. تبويب إدخال البيانات
 # --------------------------------
 def input_tab(df):
     st.header("📥 إدخال بيانات البالات")
@@ -372,7 +490,7 @@ def input_tab(df):
                 st.error("❌ أدخل وزناً صحيحاً")
 
 # --------------------------------
-# 8. تبويب إدارة البيانات (مع فلاتر التاريخ والمشرف)
+# 9. تبويب إدارة البيانات
 # --------------------------------
 def management_tab(df_full):
     st.header("📝 إدارة البيانات (تعديل وحذف)")
@@ -382,7 +500,6 @@ def management_tab(df_full):
 
     st.info("حدد نطاقاً زمنياً و/أو مشرفاً، ثم عدّل في الجدول واحفظ. جميع التغييرات تنطبق على قاعدة البيانات الكاملة، وليس فقط المعروضة.")
 
-    # --- فلترة العرض فقط ---
     col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
     with col1:
         start = st.date_input("من", st.session_state.get('filter_start', datetime.now().date() - timedelta(days=30)), key="start_inp")
@@ -405,7 +522,6 @@ def management_tab(df_full):
             st.session_state.data_editor_df = None
             st.rerun()
 
-    # تطبيق الفلاتر للعرض فقط
     df_display_full = df_full.copy()
     if 'filter_start' in st.session_state and 'filter_end' in st.session_state:
         df_display_full = df_display_full[(df_display_full['التاريخ'] >= st.session_state['filter_start']) &
@@ -419,7 +535,6 @@ def management_tab(df_full):
         st.warning("لا توجد بيانات تطابق المعايير")
         return
 
-    # تحضير البيانات للعرض
     df_display = df_display_full.copy()
     df_display['التاريخ'] = pd.to_datetime(df_display['التاريخ']).dt.date
     df_display['الوقت'] = df_display['الوقت'].apply(lambda t: t.strftime('%H:%M:%S') if hasattr(t, 'strftime') else str(t))
@@ -434,55 +549,34 @@ def management_tab(df_full):
     if 'حذف' not in edited.columns:
         edited['حذف'] = False
 
-    # أزرار التحكم
     c1, c2, c3 = st.columns([1, 1, 2])
 
-    # --- زر حفظ التغييرات (تعديلات) ---
     with c1:
         if st.button("💾 حفظ التغييرات", type="primary", use_container_width=True, disabled=st.session_state.get('saving', False)):
             st.session_state.saving = True
             try:
-                # 1. استخراج الصفوف التي تم تعديلها (من المُفلتر) مع بياناتها الكاملة (بدون عمود الحذف)
                 edited_clean = edited.drop(columns=['حذف'], errors='ignore')
-                # تحويل الوقت إلى كائن time
                 edited_clean['الوقت'] = edited_clean['الوقت'].apply(
                     lambda x: datetime.strptime(str(x), '%H:%M:%S').time() if isinstance(x, str) else x
                 )
-                # تحويل التاريخ إلى date
                 edited_clean['التاريخ'] = pd.to_datetime(edited_clean['التاريخ'], errors='coerce').dt.date
 
-                # 2. تحديث البيانات الكاملة: نأخذ البيانات الكاملة الأصلية، ونستبدل الصفوف التي لها نفس المفتاح (التاريخ، الوقت، المشرف، نوع البالة، الوزن)
-                #    ولكن بما أنه لا يوجد مفتاح فريد، نستخدم فكرة: نأخذ جميع الصفوف من df_full، ونستبدل الصفوف الموجودة في edited_clean
-                #    عن طريق تطابق (التاريخ، الوقت، المشرف، نوع البالة، الوزن) - هذا تقريبي، لكن الأفضل هو إضافة عمود معرف فريد.
-                #    لحل هذه المشكلة بشكل آمن، سنقوم بدمج البيانات كالتالي:
-                #    نأخذ جميع الصفوف من df_full، ونزيل أي صف موجود في edited_clean (بناءً على تطابق جميع الأعمدة)، ثم نضيف edited_clean.
-                #    ولكن هذا قد لا يكون دقيقاً إذا كانت هناك نسخ مكررة، لذا سنستخدم طريقة أكثر أماناً:
-                #    نقوم بحذف جميع الصفوف التي تتطابق مع الصفوف في edited_clean (باستخدام merge مع مؤشر)، ثم نضيف الصفوف المعدلة.
-
-                # تحويل df_full إلى نسخة قابلة للتعديل
                 df_full_work = df_full.copy()
-                # تحويل الوقت إلى نص للمقارنة (نفس تنسيق edited_clean بعد تحويل الوقت)
                 df_full_work['الوقت_str'] = df_full_work['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
                 edited_clean['الوقت_str'] = edited_clean['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
 
-                # تحديد الأعمدة المستخدمة للمقارنة (بدون الملاحظات لأنها قد تتغير)
                 compare_cols = ['التاريخ', 'الوقت_str', 'المشرف', 'نوع البالة', 'وزن البالة']
-                # دمج لتحديد الصفوف التي سيتم تحديثها
                 merged = pd.merge(df_full_work[compare_cols], edited_clean[compare_cols], on=compare_cols, how='inner', indicator=True)
-                # الصفوف التي يجب إزالتها من df_full_work (تلك الموجودة في edited_clean)
                 rows_to_remove = merged[merged['_merge'] == 'both'][compare_cols]
                 if not rows_to_remove.empty:
-                    # إزالة الصفوف القديمة
                     df_full_work = pd.merge(df_full_work, rows_to_remove, on=compare_cols, how='left', indicator=True)
                     df_full_work = df_full_work[df_full_work['_merge'] == 'left_only'].drop(columns=['_merge', 'الوقت_str'])
                 else:
                     df_full_work = df_full_work.drop(columns=['الوقت_str'], errors='ignore')
 
-                # إضافة الصفوف المعدلة (مع إزالة عمود الوقت_str)
                 edited_clean_final = edited_clean.drop(columns=['الوقت_str'], errors='ignore')
                 df_final = pd.concat([df_full_work, edited_clean_final], ignore_index=True)
 
-                # حفظ البيانات الكاملة
                 if save_cotton_data(df_final, "تعديل البيانات"):
                     st.session_state.success_msg = "✅ تم حفظ التغييرات بنجاح"
                     st.session_state.data_editor_df = None
@@ -495,7 +589,6 @@ def management_tab(df_full):
                 st.session_state.saving = False
                 st.error(f"❌ خطأ: {e}")
 
-    # --- زر حذف المحددات ---
     with c2:
         to_delete = edited[edited['حذف'] == True] if 'حذف' in edited.columns else pd.DataFrame()
         if not to_delete.empty:
@@ -511,7 +604,6 @@ def management_tab(df_full):
             st.session_state.data_editor_df = None
             st.rerun()
 
-    # --- تأكيد الحذف ---
     if st.session_state.get('confirm_delete', False):
         to_delete = edited[edited['حذف'] == True] if 'حذف' in edited.columns else pd.DataFrame()
         if to_delete.empty:
@@ -520,10 +612,7 @@ def management_tab(df_full):
         st.warning(f"⚠️ سيتم حذف {len(to_delete)} صف من قاعدة البيانات بالكامل. هل أنت متأكد؟")
         col_yes, col_no = st.columns(2)
         if col_yes.button("نعم", key="del_yes"):
-            # حذف من البيانات الكاملة وليس فقط المُفلتر
-            # نستخدم نفس منطق المقارنة لإزالة الصفوف من df_full
             df_full_work = df_full.copy()
-            # تحويل الوقت إلى نص للمقارنة
             df_full_work['الوقت_str'] = df_full_work['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
             to_delete_clean = to_delete.drop(columns=['حذف'], errors='ignore')
             to_delete_clean['الوقت'] = to_delete_clean['الوقت'].apply(
@@ -533,7 +622,6 @@ def management_tab(df_full):
             to_delete_clean['الوقت_str'] = to_delete_clean['الوقت'].apply(lambda x: x.strftime('%H:%M:%S') if hasattr(x, 'strftime') else str(x))
 
             compare_cols = ['التاريخ', 'الوقت_str', 'المشرف', 'نوع البالة', 'وزن البالة']
-            # دمج لإيجاد الصفوف المطلوب حذفها
             merged = pd.merge(df_full_work[compare_cols], to_delete_clean[compare_cols], on=compare_cols, how='inner', indicator=True)
             rows_to_delete = merged[merged['_merge'] == 'both'][compare_cols]
             if not rows_to_delete.empty:
@@ -553,7 +641,6 @@ def management_tab(df_full):
             st.session_state.confirm_delete = False
             st.rerun()
 
-    # ملخص
     st.markdown("---")
     st.subheader("📊 ملخص")
     c1, c2, c3 = st.columns(3)
@@ -561,8 +648,9 @@ def management_tab(df_full):
     if not edited.empty:
         c2.metric("إجمالي الوزن (المعروض)", f"{edited['وزن البالة'].sum():,.1f} كجم")
         c3.metric("المتوسط (المعروض)", f"{edited['وزن البالة'].mean():.1f} كجم")
+
 # --------------------------------
-# 9. تبويب الإحصائيات المتقدمة
+# 10. تبويب الإحصائيات المتقدمة
 # --------------------------------
 def stats_tab(df):
     st.header("📊 الإحصائيات المتقدمة")
@@ -642,7 +730,7 @@ def stats_tab(df):
             st.dataframe(by_shift, use_container_width=True)
 
 # --------------------------------
-# 10. تبويبات الإدارة (المستخدمين والتكوين)
+# 11. تبويبات الإدارة (المستخدمين والتكوين)
 # --------------------------------
 def users_management_tab():
     st.header("👥 إدارة المستخدمين")
@@ -761,9 +849,28 @@ def config_management_tab():
                 st.warning("لا يمكن حذف آخر نوع")
 
 # --------------------------------
-# 11. تشغيل التطبيق الرئيسي
+# 12. تشغيل التطبيق الرئيسي
 # --------------------------------
 st.set_page_config(page_title=APP_CONFIG["TITLE"], layout="wide")
+
+# --- بداية الكود الخاص بالإشعار التلقائي (جديد) ---
+# التحقق من تفعيل الإشعار التلقائي
+if 'auto_email_enabled' not in st.session_state:
+    st.session_state.auto_email_enabled = False
+
+# متغير لتخزين وقت آخر إرسال
+if 'last_auto_email' not in st.session_state:
+    st.session_state.last_auto_email = datetime.now() - timedelta(minutes=5)  # لتفعيل الإرسال فوراً عند التشغيل الأول
+
+# حقن كود JavaScript لإعادة تحميل الصفحة كل 5 ثوانٍ (إذا كان التفعيل مفعلاً)
+if st.session_state.auto_email_enabled:
+    st.components.v1.html("""
+    <script>
+    setTimeout(function() {
+        window.location.reload();
+    }, 5000);
+    </script>
+    """, height=0)
 
 # الشريط الجانبي
 with st.sidebar:
@@ -771,6 +878,17 @@ with st.sidebar:
     logged = login_ui()
     if not logged:
         st.stop()
+
+    st.markdown("---")
+
+    # --- زر تفعيل الإشعار التلقائي (جديد) ---
+    auto_email_toggle = st.checkbox("🔔 تفعيل الإشعار التلقائي (كل 5 ثوانٍ)", value=st.session_state.auto_email_enabled)
+    if auto_email_toggle != st.session_state.auto_email_enabled:
+        st.session_state.auto_email_enabled = auto_email_toggle
+        st.rerun()
+
+    if st.session_state.auto_email_enabled:
+        st.info("🔄 الإشعار مفعّل. سيتم إرسال تقرير كل 5 ثوانٍ.")
 
     st.markdown("---")
     if st.button("🔄 تحديث من GitHub"):
@@ -785,6 +903,18 @@ with st.sidebar:
 
 # تحميل البيانات
 df = load_cotton_data()
+
+# --- منطق إرسال البريد الإلكتروني التلقائي (جديد) ---
+if st.session_state.auto_email_enabled and not df.empty:
+    now = datetime.now()
+    last_time = st.session_state.last_auto_email
+    # إذا مرت 5 ثوانٍ أو أكثر منذ آخر إرسال
+    if (now - last_time).total_seconds() >= 5:
+        # حساب الإحصائيات وإرسال البريد
+        send_auto_email(df)
+        # تحديث وقت آخر إرسال
+        st.session_state.last_auto_email = now
+
 st.title(f"{APP_CONFIG['ICON']} {APP_CONFIG['TITLE']}")
 
 # صلاحيات
