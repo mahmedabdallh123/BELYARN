@@ -403,15 +403,14 @@ def get_today_stats(df):
             'total_weight': 0,
             'total_bales': 0,
             'avg_weight': 0,
-            'supervisors': [],
-            'types': [],
-            'shifts': []
+            'supervisors': {},   # قاموس فارغ بدلاً من قائمة
+            'types': {},
+            'shifts': {}
         }
     total_weight = df_today['وزن البالة'].sum()
     total_bales = len(df_today)
     avg_weight = total_weight / total_bales if total_bales > 0 else 0
 
-    # تفاصيل إضافية
     sup_summary = df_today.groupby('المشرف')['وزن البالة'].sum().to_dict()
     type_summary = df_today.groupby('نوع البالة')['وزن البالة'].sum().to_dict()
     shift_summary = df_today.groupby('الوردية')['وزن البالة'].sum().to_dict()
@@ -428,6 +427,9 @@ def get_today_stats(df):
 
 def send_auto_email(df):
     """حساب إحصائيات اليوم وإرسالها عبر البريد الإلكتروني."""
+    if df.empty:
+        return  # لا توجد بيانات، لا نرسل شيئاً
+
     stats = get_today_stats(df)
     if stats is None:
         return
@@ -904,15 +906,12 @@ with st.sidebar:
 # تحميل البيانات
 df = load_cotton_data()
 
-# --- منطق إرسال البريد الإلكتروني التلقائي (جديد) ---
+# --- منطق إرسال البريد الإلكتروني التلقائي (مع التحقق من البيانات) ---
 if st.session_state.auto_email_enabled and not df.empty:
     now = datetime.now()
     last_time = st.session_state.last_auto_email
-    # إذا مرت 5 ثوانٍ أو أكثر منذ آخر إرسال
     if (now - last_time).total_seconds() >= 5:
-        # حساب الإحصائيات وإرسال البريد
         send_auto_email(df)
-        # تحديث وقت آخر إرسال
         st.session_state.last_auto_email = now
 
 st.title(f"{APP_CONFIG['ICON']} {APP_CONFIG['TITLE']}")
