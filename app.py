@@ -8,41 +8,62 @@ from datetime import datetime, timedelta
 from github import Github
 
 # --------------------------------
-# 0. دوال البريد الإلكتروني (جديدة)
+# 0. دوال البريد الإلكتروني (معدلة بالكامل)
 # --------------------------------
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 def get_email_config():
-    """استخراج إعدادات البريد من secrets."""
+    """استخراج إعدادات البريد من secrets مع دعم كلا الصيغتين (recipient / recipients)."""
     try:
         host = st.secrets["email"]["host"]
         port = int(st.secrets["email"]["port"])
         username = st.secrets["email"]["username"]
         password = st.secrets["email"]["password"]
-        recipient = st.secrets["email"]["recipient"]
+        
+        # إزالة المسافات من كلمة المرور (قد تسبب مشاكل في SMTP)
+        password = password.replace(" ", "")
+        
+        # دعم كلا المفتاحين: recipient (مفرد) أو recipients (جمع)
+        recipient = st.secrets["email"].get("recipient")
+        if not recipient:
+            recipient = st.secrets["email"].get("recipients")
+        
+        # إذا كان recipients يحتوي على عدة عناوين مفصولة بفواصل
+        if recipient and isinstance(recipient, str) and "," in recipient:
+            recipient = [r.strip() for r in recipient.split(",")]
+        elif recipient:
+            recipient = [recipient]
+        else:
+            recipient = []
+            
         return {
             "host": host,
             "port": port,
             "username": username,
             "password": password,
-            "recipient": recipient
+            "recipients": recipient  # قائمة
         }
-    except Exception:
+    except Exception as e:
+        st.error(f"❌ خطأ في قراءة إعدادات البريد: {e}")
         return None
 
 def send_email_report(subject: str, body: str) -> bool:
-    """إرسال بريد إلكتروني يحتوي على تقرير الإحصائيات."""
+    """إرسال بريد إلكتروني مع عرض تفصيلي للأخطاء."""
     config = get_email_config()
     if not config:
         st.warning("⚠️ إعدادات البريد الإلكتروني غير مكتملة. لن يتم إرسال الإشعارات.")
         return False
 
+    if not config["recipients"]:
+        st.warning("⚠️ لا يوجد مستلم (recipient) في الإعدادات.")
+        return False
+
     try:
         msg = MIMEMultipart()
         msg["From"] = config["username"]
-        msg["To"] = config["recipient"]
+        msg["To"] = ", ".join(config["recipients"])
         msg["Subject"] = subject
 
         msg.attach(MIMEText(body, "plain", "utf-8"))
@@ -50,12 +71,70 @@ def send_email_report(subject: str, body: str) -> bool:
         server = smtplib.SMTP(config["host"], config["port"])
         server.starttls()
         server.login(config["username"], config["password"])
-        server.sendmail(config["username"], config["recipient"], msg.as_string())
+        server.sendmail(config["username"], config["recipients"], msg.as_string())
         server.quit()
+        
+        # عرض رسالة نجاح في الواجهة (للتأكيد)
+        st.success(f"✅ تم إرسال البريد بنجاح إلى {', '.join(config['recipients'])}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        st.error(f"❌ فشل المصادقة: تأكد من اسم المستخدم وكلمة مرور التطبيق. (تفاصيل: {e})")
+        return False
+    except smtplib.SMTPException as e:
+        st.error(f"❌ خطأ في خادم SMTP: {e}")
+        return False
     except Exception as e:
         st.error(f"❌ فشل إرسال البريد الإلكتروني: {e}")
         return False
+
+def send_auto_email(df):
+    """حساب إحصائيات اليوم وإرسالها عبر البريد الإلكتروني (مع التحقق من وجود بيانات)."""
+    if df.empty:
+        st.info("ℹ️ لا توجد بيانات في الملف، لن يتم إرسال بريد.")
+        return
+
+    today = datetime.now().date()
+    df_today = df[df['التاريخ'] == today]
+    
+    if df_today.empty:
+        st.info(f"ℹ️ لا توجد بيانات لليوم ({today})، لن يتم إرسال بريد.")
+        return
+
+    total_weight = df_today['وزن البالة'].sum()
+    total_bales = len(df_today)
+    avg_weight = total_weight / total_bales if total_bales > 0 else 0
+
+    sup_summary = df_today.groupby('المشرف')['وزن البالة'].sum().to_dict()
+    type_summary = df_today.groupby('نوع البالة')['وزن البالة'].sum().to_dict()
+    shift_summary = df_today.groupby('الوردية')['وزن البالة'].sum().to_dict()
+
+    # تنسيق نص البريد
+    body = f"""📊 تقرير إنتاج اليوم - {today.strftime('%Y-%m-%d')}
+================================
+
+📈 إجمالي الوزن: {round(total_weight, 2)} كجم
+📦 عدد البالات: {total_bales}
+⚖️ متوسط الوزن: {round(avg_weight, 2)} كجم
+
+--- تفاصيل حسب المشرفين ---
+"""
+    for sup, w in sup_summary.items():
+        body += f"  {sup}: {w} كجم\n"
+
+    body += "\n--- تفاصيل حسب نوع البالة ---\n"
+    for t, w in type_summary.items():
+        body += f"  {t}: {w} كجم\n"
+
+    body += "\n--- تفاصيل حسب الوردية ---\n"
+    for s, w in shift_summary.items():
+        body += f"  {s}: {w} كجم\n"
+
+    body += f"\n🕒 وقت الإرسال: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    subject = f"تقرير إنتاج مكبس القطن - {today.strftime('%Y-%m-%d')}"
+
+    # محاولة الإرسال
+    send_email_report(subject, body)
 
 # --------------------------------
 # 1. الإعدادات والتكوين
@@ -390,79 +469,7 @@ def generate_stats(df, start, end, filter_bale=None, filter_supervisor=None):
     return by_type, by_sup, by_shift, daily
 
 # --------------------------------
-# 7. دالة الحصول على إحصائيات اليوم (للبريد الإلكتروني)
-# --------------------------------
-def get_today_stats(df):
-    if df.empty:
-        return None
-    today = datetime.now().date()
-    df_today = df[df['التاريخ'] == today]
-    if df_today.empty:
-        return {
-            'date': today,
-            'total_weight': 0,
-            'total_bales': 0,
-            'avg_weight': 0,
-            'supervisors': {},   # قاموس فارغ بدلاً من قائمة
-            'types': {},
-            'shifts': {}
-        }
-    total_weight = df_today['وزن البالة'].sum()
-    total_bales = len(df_today)
-    avg_weight = total_weight / total_bales if total_bales > 0 else 0
-
-    sup_summary = df_today.groupby('المشرف')['وزن البالة'].sum().to_dict()
-    type_summary = df_today.groupby('نوع البالة')['وزن البالة'].sum().to_dict()
-    shift_summary = df_today.groupby('الوردية')['وزن البالة'].sum().to_dict()
-
-    return {
-        'date': today,
-        'total_weight': round(total_weight, 2),
-        'total_bales': total_bales,
-        'avg_weight': round(avg_weight, 2),
-        'supervisors': sup_summary,
-        'types': type_summary,
-        'shifts': shift_summary
-    }
-
-def send_auto_email(df):
-    """حساب إحصائيات اليوم وإرسالها عبر البريد الإلكتروني."""
-    if df.empty:
-        return  # لا توجد بيانات، لا نرسل شيئاً
-
-    stats = get_today_stats(df)
-    if stats is None:
-        return
-
-    # تنسيق نص البريد
-    body = f"""📊 تقرير إنتاج اليوم - {stats['date'].strftime('%Y-%m-%d')}
-================================
-
-📈 إجمالي الوزن: {stats['total_weight']} كجم
-📦 عدد البالات: {stats['total_bales']}
-⚖️ متوسط الوزن: {stats['avg_weight']} كجم
-
---- تفاصيل حسب المشرفين ---
-"""
-    for sup, w in stats['supervisors'].items():
-        body += f"  {sup}: {w} كجم\n"
-
-    body += "\n--- تفاصيل حسب نوع البالة ---\n"
-    for t, w in stats['types'].items():
-        body += f"  {t}: {w} كجم\n"
-
-    body += "\n--- تفاصيل حسب الوردية ---\n"
-    for s, w in stats['shifts'].items():
-        body += f"  {s}: {w} كجم\n"
-
-    body += f"\n🕒 وقت الإرسال: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-
-    subject = f"تقرير إنتاج مكبس القطن - {stats['date'].strftime('%Y-%m-%d')}"
-
-    send_email_report(subject, body)
-
-# --------------------------------
-# 8. تبويب إدخال البيانات
+# 7. تبويب إدخال البيانات
 # --------------------------------
 def input_tab(df):
     st.header("📥 إدخال بيانات البالات")
@@ -492,7 +499,7 @@ def input_tab(df):
                 st.error("❌ أدخل وزناً صحيحاً")
 
 # --------------------------------
-# 9. تبويب إدارة البيانات
+# 8. تبويب إدارة البيانات
 # --------------------------------
 def management_tab(df_full):
     st.header("📝 إدارة البيانات (تعديل وحذف)")
@@ -652,7 +659,7 @@ def management_tab(df_full):
         c3.metric("المتوسط (المعروض)", f"{edited['وزن البالة'].mean():.1f} كجم")
 
 # --------------------------------
-# 10. تبويب الإحصائيات المتقدمة
+# 9. تبويب الإحصائيات المتقدمة
 # --------------------------------
 def stats_tab(df):
     st.header("📊 الإحصائيات المتقدمة")
@@ -732,7 +739,7 @@ def stats_tab(df):
             st.dataframe(by_shift, use_container_width=True)
 
 # --------------------------------
-# 11. تبويبات الإدارة (المستخدمين والتكوين)
+# 10. تبويبات الإدارة (المستخدمين والتكوين)
 # --------------------------------
 def users_management_tab():
     st.header("👥 إدارة المستخدمين")
@@ -851,18 +858,16 @@ def config_management_tab():
                 st.warning("لا يمكن حذف آخر نوع")
 
 # --------------------------------
-# 12. تشغيل التطبيق الرئيسي
+# 11. تشغيل التطبيق الرئيسي
 # --------------------------------
 st.set_page_config(page_title=APP_CONFIG["TITLE"], layout="wide")
 
-# --- بداية الكود الخاص بالإشعار التلقائي (جديد) ---
-# التحقق من تفعيل الإشعار التلقائي
+# --- بداية الكود الخاص بالإشعار التلقائي ---
 if 'auto_email_enabled' not in st.session_state:
     st.session_state.auto_email_enabled = False
 
-# متغير لتخزين وقت آخر إرسال
 if 'last_auto_email' not in st.session_state:
-    st.session_state.last_auto_email = datetime.now() - timedelta(minutes=5)  # لتفعيل الإرسال فوراً عند التشغيل الأول
+    st.session_state.last_auto_email = datetime.now() - timedelta(minutes=5)
 
 # حقن كود JavaScript لإعادة تحميل الصفحة كل 5 ثوانٍ (إذا كان التفعيل مفعلاً)
 if st.session_state.auto_email_enabled:
@@ -883,7 +888,7 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # --- زر تفعيل الإشعار التلقائي (جديد) ---
+    # زر تفعيل الإشعار التلقائي
     auto_email_toggle = st.checkbox("🔔 تفعيل الإشعار التلقائي (كل 5 ثوانٍ)", value=st.session_state.auto_email_enabled)
     if auto_email_toggle != st.session_state.auto_email_enabled:
         st.session_state.auto_email_enabled = auto_email_toggle
@@ -891,6 +896,11 @@ with st.sidebar:
 
     if st.session_state.auto_email_enabled:
         st.info("🔄 الإشعار مفعّل. سيتم إرسال تقرير كل 5 ثوانٍ.")
+
+    # زر اختبار البريد الإلكتروني (للتأكد من صحة الإعدادات)
+    if st.button("📧 اختبار البريد الإلكتروني"):
+        test_body = f"🧪 هذه رسالة اختبارية من نظام مكبس القطن.\nالوقت: {datetime.now()}"
+        send_email_report("🧪 اختبار البريد الإلكتروني", test_body)
 
     st.markdown("---")
     if st.button("🔄 تحديث من GitHub"):
